@@ -3,9 +3,10 @@ package psiconfig
 import (
 	"reflect"
 	"testing"
+	"time"
 )
 
-func Test_structKeys(t *testing.T) {
+func Test_getStructFields(t *testing.T) {
 	type testStruct struct {
 		TestStructExp   int
 		testStructUnexp int
@@ -14,13 +15,13 @@ func Test_structKeys(t *testing.T) {
 	tests := []struct {
 		name string
 		obj  interface{}
-		want []aliasedKey
+		want []structField
 	}{
 		{
 			name: "empty struct",
 			obj: struct {
 			}{},
-			want: []aliasedKey{},
+			want: []structField{},
 		},
 		{
 			name: "only unexported fields",
@@ -28,7 +29,7 @@ func Test_structKeys(t *testing.T) {
 				a int
 				b string
 			}{},
-			want: []aliasedKey{},
+			want: []structField{},
 		},
 		{
 			name: "exported sub-struct with only unexported fields",
@@ -38,7 +39,15 @@ func Test_structKeys(t *testing.T) {
 					b string
 				}
 			}{},
-			want: []aliasedKey{},
+			want: []structField{
+				{
+					aliasedKey:   aliasedKey{{"S"}},
+					typ:          "struct { a int; b string }",
+					kind:         "struct",
+					optional:     false,
+					expectedType: "",
+				},
+			},
 		},
 		{
 			name: "simple exported fields",
@@ -46,12 +55,20 @@ func Test_structKeys(t *testing.T) {
 				A int
 				B string
 			}{},
-			want: []aliasedKey{
+			want: []structField{
 				{
-					{"A"},
+					aliasedKey:   aliasedKey{{"A"}},
+					typ:          "int",
+					kind:         "int",
+					optional:     false,
+					expectedType: "",
 				},
 				{
-					{"B"},
+					aliasedKey:   aliasedKey{{"B"}},
+					typ:          "string",
+					kind:         "string",
+					optional:     false,
+					expectedType: "",
 				},
 			},
 		},
@@ -63,12 +80,20 @@ func Test_structKeys(t *testing.T) {
 				c bool
 				d float32
 			}{},
-			want: []aliasedKey{
+			want: []structField{
 				{
-					{"A"},
+					aliasedKey:   aliasedKey{{"A"}},
+					typ:          "int",
+					kind:         "int",
+					optional:     false,
+					expectedType: "",
 				},
 				{
-					{"B"},
+					aliasedKey:   aliasedKey{{"B"}},
+					typ:          "string",
+					kind:         "string",
+					optional:     false,
+					expectedType: "",
 				},
 			},
 		},
@@ -76,34 +101,50 @@ func Test_structKeys(t *testing.T) {
 			name: "tagged fields",
 			obj: struct {
 				A int
-				B string
+				B string `psiconfig:"optional" toml:"bird"`
 				c bool
 				d float32
-				E bool    `toml:"elephant"`
+				E bool    `toml:"elephant,omitempty" psiconfig:"optional,string"`
 				F float32 `toml:"-"`
-				G int     `toml:"giraffe,omitempty"`
-				H int     `json:"giraffe,omitempty"`
+				G int     `psiconfig:",int64" json:"giraffe,omitempty"`
+				H int     `json:"hippo,omitempty" psiconfig:"optional"`
 			}{},
-			want: []aliasedKey{
+			want: []structField{
 				{
-					{"A"},
+					aliasedKey:   aliasedKey{{"A"}},
+					typ:          "int",
+					kind:         "int",
+					optional:     false,
+					expectedType: "",
 				},
 				{
-					{"B"},
+					aliasedKey:   aliasedKey{{"B", "bird"}},
+					typ:          "string",
+					kind:         "string",
+					optional:     true,
+					expectedType: "",
 				},
 				{
-					{"E", "elephant"},
+					aliasedKey:   aliasedKey{{"E", "elephant"}},
+					typ:          "bool",
+					kind:         "bool",
+					optional:     true,
+					expectedType: "string",
 				},
 				{
-					{"F"},
+					aliasedKey:   aliasedKey{{"G", "giraffe"}},
+					typ:          "int",
+					kind:         "int",
+					optional:     false,
+					expectedType: "int64",
 				},
 				{
-					{"G", "giraffe"},
-				},
-				{
-					{"H"},
-				},
-			},
+					aliasedKey:   aliasedKey{{"H", "hippo"}},
+					typ:          "int",
+					kind:         "int",
+					optional:     true,
+					expectedType: "",
+				}},
 		},
 		{
 			name: "sub-structs",
@@ -117,18 +158,48 @@ func Test_structKeys(t *testing.T) {
 					} `toml:"banana3_top"`
 				} `toml:"banana_top"`
 			}{},
-			want: []aliasedKey{
+			want: []structField{
 				{
-					{"A"},
+					aliasedKey:   aliasedKey{{"A"}},
+					typ:          "int",
+					kind:         "int",
+					optional:     false,
+					expectedType: "",
 				},
 				{
-					{"B", "banana_top"}, {"B1"},
+					aliasedKey:   aliasedKey{{"B", "banana_top"}},
+					typ:          `struct { B1 int; B2 int "toml:\"banana2\""; B3 struct { B31 int } "toml:\"banana3_top\"" }`,
+					kind:         "struct",
+					optional:     false,
+					expectedType: "",
 				},
 				{
-					{"B", "banana_top"}, {"B2", "banana2"},
+					aliasedKey:   aliasedKey{{"B", "banana_top"}, {"B1"}},
+					typ:          "int",
+					kind:         "int",
+					optional:     false,
+					expectedType: "",
 				},
 				{
-					{"B", "banana_top"}, {"B3", "banana3_top"}, {"B31"},
+					aliasedKey:   aliasedKey{{"B", "banana_top"}, {"B2", "banana2"}},
+					typ:          "int",
+					kind:         "int",
+					optional:     false,
+					expectedType: "",
+				},
+				{
+					aliasedKey:   aliasedKey{{"B", "banana_top"}, {"B3", "banana3_top"}},
+					typ:          "struct { B31 int }",
+					kind:         "struct",
+					optional:     false,
+					expectedType: "",
+				},
+				{
+					aliasedKey:   aliasedKey{{"B", "banana_top"}, {"B3", "banana3_top"}, {"B31"}},
+					typ:          "int",
+					kind:         "int",
+					optional:     false,
+					expectedType: "",
 				},
 			},
 		},
@@ -146,38 +217,139 @@ func Test_structKeys(t *testing.T) {
 				G *testStruct
 				H []string
 			}{E: testStruct{}, G: &testStruct{}},
-			want: []aliasedKey{
+			want: []structField{
 				{
-					{"A"},
+					aliasedKey:   aliasedKey{{"A"}},
+					typ:          "*int",
+					kind:         "ptr",
+					optional:     false,
+					expectedType: "",
 				},
 				{
-					{"B"},
+					aliasedKey:   aliasedKey{{"B"}},
+					typ:          "interface {}",
+					kind:         "interface",
+					optional:     false,
+					expectedType: "",
 				},
 				{
-					{"C"},
+					aliasedKey:   aliasedKey{{"C"}},
+					typ:          "*struct { C1 int }",
+					kind:         "ptr",
+					optional:     false,
+					expectedType: "",
 				},
 				{
-					{"D"},
+					aliasedKey:   aliasedKey{{"D"}},
+					typ:          "map[string]int",
+					kind:         "map",
+					optional:     false,
+					expectedType: "",
 				},
 				{
-					{"E"}, {"TestStructExp"},
+					aliasedKey:   aliasedKey{{"E"}},
+					typ:          "psiconfig.testStruct",
+					kind:         "struct",
+					optional:     false,
+					expectedType: "",
 				},
 				{
-					{"F"},
+					aliasedKey:   aliasedKey{{"E"}, {"TestStructExp"}},
+					typ:          "int",
+					kind:         "int",
+					optional:     false,
+					expectedType: "",
 				},
 				{
-					{"G"}, {"TestStructExp"},
+					aliasedKey:   aliasedKey{{"F"}},
+					typ:          "*psiconfig.testStruct",
+					kind:         "ptr",
+					optional:     false,
+					expectedType: "",
 				},
 				{
-					{"H"},
+					aliasedKey:   aliasedKey{{"G"}},
+					typ:          "psiconfig.testStruct",
+					kind:         "struct",
+					optional:     false,
+					expectedType: "",
+				},
+				{
+					aliasedKey:   aliasedKey{{"G"}, {"TestStructExp"}},
+					typ:          "int",
+					kind:         "int",
+					optional:     false,
+					expectedType: "",
+				},
+				{
+					aliasedKey:   aliasedKey{{"H"}},
+					typ:          "[]string",
+					kind:         "slice",
+					optional:     false,
+					expectedType: ""},
+			},
+		},
+		{
+			name: "UnmarshalText handling",
+			obj: struct {
+				A    int
+				Time time.Time `json:"the_time" psiconfig:"optional"`
+				B    string
+			}{},
+			want: []structField{
+				{
+					aliasedKey:   aliasedKey{{"A"}},
+					typ:          "int",
+					kind:         "int",
+					optional:     false,
+					expectedType: "",
+				},
+				{
+					aliasedKey:   aliasedKey{{"Time", "the_time"}},
+					typ:          "time.Time",
+					kind:         "struct",
+					optional:     true,
+					expectedType: "string",
+				},
+				{
+					aliasedKey:   aliasedKey{{"B"}},
+					typ:          "string",
+					kind:         "string",
+					optional:     false,
+					expectedType: "",
+				},
+			},
+		},
+		{
+			name: "pointer to struct",
+			obj: &struct {
+				A int
+				B string
+			}{},
+			want: []structField{
+				{
+					aliasedKey:   aliasedKey{{"A"}},
+					typ:          "int",
+					kind:         "int",
+					optional:     false,
+					expectedType: "",
+				},
+				{
+					aliasedKey:   aliasedKey{{"B"}},
+					typ:          "string",
+					kind:         "string",
+					optional:     false,
+					expectedType: "",
 				},
 			},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := structKeys(tt.obj); !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("structKeys() = %#v, want %#v", got, tt.want)
+			got := getStructFields(tt.obj)
+
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("getStructFields() = %#v, want %#v", got, tt.want)
 			}
 		})
 	}

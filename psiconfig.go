@@ -1,27 +1,28 @@
 package psiconfig
 
 import (
-	"fmt"
 	"io"
+	"io/ioutil"
 	"os"
+	"reflect"
 	"strconv"
 	"strings"
 
-	"github.com/BurntSushi/toml"
 	"github.com/pkg/errors"
 )
 
-// Like https://godoc.org/github.com/BurntSushi/toml#Key
+const structTagName = "psiconfig"
+
+type Codec struct {
+	Marshal   func(v interface{}) ([]byte, error)
+	Unmarshal func(data []byte, v interface{}) error
+}
+
 type Key []string
 
 // Convert k to a string appropriate for keying a map (so, unique and consistent).
 func (k Key) String() string {
 	return strings.Join(k, ".")
-}
-
-// Create one of our Keys from a toml.Key.
-func newKeyFromTomlKey(tk toml.Key) Key {
-	return Key(tk)
 }
 
 type EnvOverride struct {
@@ -33,95 +34,24 @@ type EnvOverride struct {
 type Contributions map[string]string
 
 type Metadata struct {
-	tomlMD           *toml.MetaData
-	configStructKeys []aliasedKey
-	Contributions    Contributions
+	structFields  []structField
+	absentFields  []structField
+	Contributions Contributions
 }
 
-// IsDefined tests whether the given key was defined -- either in the TOML sources or as
-// an environment variable.
-// key may refer to a field in the config struct or in the TOML, which may differ by case
-// or through the use of a `toml:"name"`.
-// If the given key cannot be mapped to a field in the struct, an error will be returned.
 func (md *Metadata) IsDefined(key ...string) (bool, error) {
-	// This check is complicated by the fact that Go struct exported fields must be uppercase,
-	// but TOML fields will typically -- but not necessarily -- be lower case, and `toml:"name"`
-	// can be used to map to anything at all. And we're allowing the input to either or
-	// both or a mix.
-
-	if len(key) == 0 {
+	aliasedKey := aliasedKeyFromKey(key)
+	_, ok := findStructField(md.absentFields, aliasedKey)
+	if ok {
 		return false, nil
 	}
 
-	// First find the corresponding struct key
-	var matchingStructKey *aliasedKey
-StructSearchLoop:
-	for _, structKey := range md.configStructKeys {
-		if len(structKey) < len(key) {
-			// Can't possibly match
-			continue
-		}
-
-		// Loop through the components of the supplied key to see if this structKey matches
-	KeySearchLoop:
-		for i := range key {
-			keyElem := key[i]
-			structKeyElemAliases := structKey[i]
-
-			// structKey elems may have multiple names (because of `toml:"name"`)
-			for _, alias := range structKeyElemAliases {
-				// Do a case-insensitive comparison, since BurntSushi/toml does
-				if strings.EqualFold(alias, keyElem) {
-					// We found a matching alias for this key elem
-					continue KeySearchLoop
-				}
-			}
-
-			// No alias matched; it can't be this struct key
-			continue StructSearchLoop
-		}
-
-		// This struct key matched. But it might actually be longer than the one
-		// specified by the caller, so truncate to the match length.
-		truncatedStructKey := structKey[:len(key)]
-		matchingStructKey = &truncatedStructKey
-		break
-	}
-
-	if matchingStructKey == nil {
-		// We didn't find any matching struct key. This indicates an incorrect call.
-		return false, errors.Errorf("given key matched no field of the config struct: %#v", key)
-	}
-
-	// We know what struct key to use; try to find it in the TOML keys
-TOMLKeySearchLoop:
-	for _, tomlKey := range md.tomlMD.Keys() {
-		if len(tomlKey) < len(*matchingStructKey) {
-			// Can't possibly match
-			continue
-		}
-
-	StructKeySearchLoop:
-		for i := range *matchingStructKey {
-			structKeyElemAliases := (*matchingStructKey)[i]
-			tomlKeyElem := tomlKey[i]
-
-			for _, alias := range structKeyElemAliases {
-				if strings.EqualFold(alias, tomlKeyElem) {
-					// We found a matching alias for this key elem
-					continue StructKeySearchLoop
-				}
-			}
-
-			// No alias matched; this can't be the tomlKey
-			continue TOMLKeySearchLoop
-		}
-
-		// tomlKey matches matchingStructKey, so our answer is "true"
+	_, ok = findStructField(md.structFields, aliasedKey)
+	if ok {
 		return true, nil
 	}
 
-	return false, nil
+	return false, errors.Errorf("key does not exist among known fields: %+v", md.structFields)
 }
 
 // readers will be used to populate the config. Later readers in the slice will take precedence and clobber the earlier.
@@ -129,39 +59,72 @@ TOMLKeySearchLoop:
 // Each of those envvars will result in overriding a key's value in the resulting struct.
 // absentKeys can be used to determine if defaults should be applied (as zero values might be valid and
 // not indicate absence).
-func Load(readers []io.Reader, readerNames []string, envOverrides []EnvOverride, result interface{},
+// result may be struct or map
+func Load(codec Codec, readers []io.Reader, readerNames []string, envOverrides []EnvOverride, result interface{},
 ) (md Metadata, err error) {
 
 	if readerNames != nil && len(readerNames) != len(readers) {
 		return md, errors.New("readerNames must be nil or the same length as readers")
 	}
 
+	reflectResult := reflect.ValueOf(result)
+	if reflectResult.Kind() != reflect.Ptr {
+		return md, errors.Errorf("result must be pointer; got %s", reflect.TypeOf(result))
+	}
+	if reflectResult.IsNil() {
+		return md, errors.Errorf("result is nil %s", reflect.TypeOf(result))
+	}
+
+	// If result is a map, clear it out, otherwise our field checking will be broken
+	if _, ok := (result).(*map[string]interface{}); ok {
+		m := make(map[string]interface{})
+		result = &m
+	}
+
+	// Get info about the struct being populated. If result is actually a map and not a
+	// struct, this will be empty.
+	md.structFields = getStructFields(result)
+
 	md.Contributions = make(map[string]string)
 
 	accumConfigMap := make(map[string]interface{})
 
+	// Get the config (file) data from the readers
 	for i, r := range readers {
 		readerName := strconv.Itoa(i)
 		if len(readerNames) > i {
 			readerName = readerNames[i]
 		}
 
-		var newConfigMap map[string]interface{}
-		tomlMetadata, err := toml.DecodeReader(r, &newConfigMap)
+		b, err := ioutil.ReadAll(r)
 		if err != nil {
-			return md, errors.Wrapf(err, "toml.Decode failed for config reader '%s'", readerName)
+			return md, errors.Wrapf(err, "ioutil.ReadAll failed for config reader '%s'", readerName)
+		}
+
+		s := string(b)
+		_ = s
+
+		var newConfigMap map[string]interface{}
+		err = codec.Unmarshal(b, &newConfigMap)
+		if err != nil {
+			return md, errors.Wrapf(err, "codec.Unmarshal failed for config reader '%s'", readerName)
+		}
+
+		// We ignore absentFields for now. Just checking types and vestigials.
+		_, err = verifyFieldsConsistency(getStructFields(newConfigMap), md.structFields)
+		if err != nil {
+			return md, errors.Wrapf(err, "verifyFieldsConsistency failed for config reader '%s'", readerName)
 		}
 
 		// Merge the new map into the accum map, and collect contributor info
-		for _, tk := range tomlMetadata.Keys() {
-			k := newKeyFromTomlKey(tk)
-			if setMapLeafFromMap(newConfigMap, accumConfigMap, k) {
-				md.Contributions[k.String()] = readerName
-			}
+		keysMerged := mergeMaps(accumConfigMap, newConfigMap, nil)
+		for _, k := range keysMerged {
+			md.Contributions[k.String()] = readerName
 		}
 	}
 
 	// Now add in the environment var overrides
+	envMap := make(map[string]interface{})
 	for _, eo := range envOverrides {
 		valStr, ok := os.LookupEnv(eo.EnvVar)
 		if !ok {
@@ -174,102 +137,52 @@ func Load(readers []io.Reader, readerNames []string, envOverrides []EnvOverride,
 			valI = eo.Conv(valStr)
 		}
 
-		if err := setMapByKey(accumConfigMap, eo.Key, valI); err != nil {
+		if err := setMapByKey(envMap, eo.Key, valI); err != nil {
 			return md, errors.Wrapf(err, "setMapByKey failed for EnvOverride: %+v", eo)
 		}
 
 		md.Contributions[eo.Key.String()] = "$" + eo.EnvVar
 	}
 
-	// We now have a map populated with all of our data, including env overrides. Now put
-	// it back into TOML and then re-decode it into the destination struct.
-	stringWriter := strings.Builder{}
-	tomlEnc := toml.NewEncoder(&stringWriter)
-	err = tomlEnc.Encode(accumConfigMap)
+	// We ignore absentFields for now. Just checking types and vestigials.
+	_, err = verifyFieldsConsistency(getStructFields(envMap), md.structFields)
 	if err != nil {
-		return md, errors.Wrap(err, "Re-encoding config map failed")
+		return md, errors.Wrapf(err, "verifyFieldsConsistency failed for env overrides")
 	}
 
-	tomlString := stringWriter.String()
-	tomlMetadata, err := toml.Decode(tomlString, result)
+	// Merge the env map into the accum map, and collect contributor info
+	mergeMaps(accumConfigMap, envMap, nil)
+
+	// Verify fields one last time on the whole accumulated map, checking absent fields
+	absentFields, err := verifyFieldsConsistency(getStructFields(accumConfigMap), md.structFields)
+	if err != nil {
+		// This shouldn't happen, since we've checked all the inputs into accumConfigMap
+		return md, errors.Wrapf(err, "verifyFieldsConsistency failed for merged map")
+	}
+
+	var missingRequiredFields []structField
+	for _, f := range absentFields {
+		if !f.optional {
+			missingRequiredFields = append(missingRequiredFields, f)
+		}
+	}
+	if len(missingRequiredFields) > 0 {
+		return md, errors.Errorf("missing required fields: %+v", missingRequiredFields)
+	}
+
+	// We now have a map populated with all of our data, including env overrides.
+	// Marshal it and then re-unmarshal it into the destination struct.
+	buf, err := codec.Marshal(accumConfigMap)
+	if err != nil {
+		return md, errors.Wrap(err, "Re-marshaling config map failed")
+	}
+
+	err = codec.Unmarshal(buf, result)
 	if err != nil {
 		return md, errors.Wrap(err, "Failed to decode re-encoded config")
 	}
-	md.tomlMD = &tomlMetadata
-
-	// Detect unused keys and error; indicates vestigial settings, a bad key rename, or incorrect envvar override
-	if len(tomlMetadata.Undecoded()) > 0 {
-		return md, errors.Errorf("unused keys found: %+v", tomlMetadata.Undecoded())
-	}
-
-	md.configStructKeys = structKeys(result)
 
 	return md, nil
-}
-
-// setMapLeafFromMap copies the first non-map value along k from fromMap to toMap.
-// Any intermediate structure missing from toMap will be created.
-// Returns true if the value at the full key was copied, and false if no copy was made or
-// if the copy happened on a subset of the key (because a non-map was encountered).
-// (This return behaviour is to help us with recording "contributions".)
-// The key might actually be a path leading through an array-of-maps -- traversal will
-// stop at the array (i.e., it stops at any non-map).
-// It will panic if the types are inconsistent between the maps.
-func setMapLeafFromMap(fromMap, toMap map[string]interface{}, k Key) bool {
-	if len(k) == 0 {
-		// This shouldn't actually happen, but handle it gracefully
-		return false
-	} else if len(k) == 1 {
-		// We're done recursing. We still only copy if we're a non-map.
-		fromVal := fromMap[k[0]]
-		if _, ok := fromVal.(map[string]interface{}); ok {
-			// fromVal is a map, so we don't copy it
-			return false
-		}
-
-		toMap[k[0]] = fromVal
-		return true
-	}
-
-	// We have more of the key to process.
-
-	// If the next step of fromMap is no longer a map, there's nothing more to do
-	nextFromMap, ok := fromMap[k[0]].(map[string]interface{})
-	if !ok {
-		return false
-	}
-
-	// Intermediate maps might not yet exist in toMap, so create if necessary.
-	subtreeWasAbsent := false
-	subtreeWasNil := false
-	if subtree, ok := toMap[k[0]]; !ok {
-		subtreeWasAbsent = true
-		toMap[k[0]] = make(map[string]interface{})
-	} else if subtree == nil {
-		subtreeWasNil = true
-		toMap[k[0]] = make(map[string]interface{})
-	}
-
-	// There's the possibility that the key exists in toMap but is of the wrong type.
-	// This means the contents of our sources are inconsistent. Panic.
-	nextToMap, ok := toMap[k[0]].(map[string]interface{})
-	if !ok {
-		panic(fmt.Sprintf("Inconsitent config values between sources for key ending with: %#v", k))
-	}
-
-	// Recuse into the map tree
-	if !setMapLeafFromMap(nextFromMap, nextToMap, k[1:]) {
-		// No leaf was set. Revert our subtree additions, if we made any.
-		if subtreeWasAbsent {
-			delete(toMap, k[0])
-		} else if subtreeWasNil {
-			toMap[k[0]] = nil
-		}
-
-		return false
-	}
-
-	return true
 }
 
 func setMapByKey(m map[string]interface{}, k Key, v interface{}) error {
@@ -290,6 +203,195 @@ func setMapByKey(m map[string]interface{}, k Key, v interface{}) error {
 	}
 
 	return setMapByKey(m[k[0]].(map[string]interface{}), k[1:], v)
+}
+
+// Merge src into dst, overwriting values. key must be nil on first call (the param
+// is used for recursive calls).
+func mergeMaps(dst, src map[string]interface{}, keyPrefix Key) (keysMerged []Key) {
+	for k, v := range src {
+		thisKey := append(keyPrefix, k)
+
+		if srcMap, ok := v.(map[string]interface{}); ok {
+			// Sub-map; recurse
+			dstMap, ok := dst[k].(map[string]interface{})
+			if !ok {
+				dstMap = make(map[string]interface{})
+				dst[k] = dstMap
+			}
+
+			keysMerged = append(keysMerged, mergeMaps(dstMap, srcMap, thisKey)...)
+		} else {
+			dst[k] = v
+			keysMerged = append(keysMerged, thisKey)
+		}
+	}
+
+	return keysMerged
+}
+
+// Checks three things:
+// 1. There's nothing in check that's not in gold (because that indicates a vestigial
+// field in the config).
+// 2. The field types match.
+// 3. Absent fields (required or optional). Return this, but don't error on it.
+func verifyFieldsConsistency(check, gold []structField) (absentFields []structField, err error) {
+	// Start by treating all the gold fields as absent, then remove them as we hit them
+	absentFields = make([]structField, len(gold))
+	copy(absentFields, gold)
+
+	var skipPrefixes []aliasedKey
+
+CheckFieldsLoop:
+	for _, checkField := range check {
+		for _, skipPrefix := range skipPrefixes {
+			if aliasedKeyPrefixMatch(checkField.aliasedKey, skipPrefix) {
+				// Keys skipped due to skipPrefix do not cound as "absent".
+				// So remove checkField from absentFields (if present).
+				for i := range absentFields {
+					if aliasedKeysMatch(absentFields[i].aliasedKey, checkField.aliasedKey) {
+						absentFields = append(absentFields[:i], absentFields[i+1:]...)
+						break
+					}
+				}
+
+				continue CheckFieldsLoop
+			}
+		}
+
+		goldField, ok := findStructField(gold, checkField.aliasedKey)
+		if !ok {
+			return nil, errors.Errorf("field in config not found in struct: %+v", checkField)
+		}
+
+		// Remove goldField from absentFields
+		for i := range absentFields {
+			if aliasedKeysMatch(absentFields[i].aliasedKey, goldField.aliasedKey) {
+				absentFields = append(absentFields[:i], absentFields[i+1:]...)
+				break
+			}
+		}
+
+		noDeeper, err := fieldTypesConsistent(checkField, goldField)
+		if err != nil {
+			return nil, errors.Wrapf(err, "field types not consistent; got %+v, want %+v", checkField, goldField)
+		}
+
+		if noDeeper {
+			skipPrefixes = append(skipPrefixes, checkField.aliasedKey)
+		}
+	}
+
+	return absentFields, nil
+}
+
+// It is assumed that check is from a map and gold is from a struct.
+func fieldTypesConsistent(check, gold structField) (noDeeper bool, err error) {
+	/*
+		Examples:
+		- time.Time implements encoding.TextUnmarshaler, so expectedType will be "string"
+
+
+	*/
+
+	if gold.expectedType != "" {
+		// If a type is specified, then it must match exactly
+		if check.typ != gold.expectedType && check.kind != gold.expectedType {
+			return false, errors.Errorf("check field type/kind does not match gold expected type; check:%+v; gold:%+v", check, gold)
+		}
+
+		// When we hit an expected type, we don't want to go any deeper into the keys
+		// along this branch of the tree.
+		// For example, a struct that supports UnmarshalText (with explicit type "string")
+		// might have sub-fields that shouldn't be included in the consistency check.
+		noDeeper = true
+		return false, nil
+	}
+
+	// Exact match
+	if check.typ == gold.typ || check.typ == gold.kind {
+		return true, nil
+	}
+
+	// E.g., if there's a "*string" in the gold and a "string" in the check, that's fine
+	if gold.typ == "*"+check.typ {
+		return true, nil
+	}
+
+	if gold.kind == "struct" && check.kind == "map" {
+		return true, nil
+	}
+
+	// We'll treat different int sizes as equivalent.
+	// If values are too big for specified types, an error will occur
+	// when unmarshalling.
+	if strings.HasPrefix(gold.kind, "int") && strings.HasPrefix(check.kind, "int") {
+		return true, nil
+	}
+
+	// We'll treat different float sizes as equivalent.
+	// If values are too big for specified types, an error will occur
+	// when unmarshalling.
+	if strings.HasPrefix(gold.kind, "float") && strings.HasPrefix(check.kind, "float") {
+		return true, nil
+	}
+
+	return false, errors.Errorf("check field type/kind does not match gold expected type; check:%+v; gold:%+v", check, gold)
+}
+
+func aliasedKeysMatch(ak1, ak2 aliasedKey) bool {
+	if len(ak1) != len(ak2) {
+		return false
+	}
+
+	for i := range ak1 {
+		ak1Elem := ak1[i]
+		ak2Elem := ak2[i]
+
+		for _, ak1Alias := range ak1Elem {
+			for _, ak2Alias := range ak2Elem {
+				// Do a case-insensitive comparison, since BurntSushi/toml does
+				if strings.EqualFold(ak1Alias, ak2Alias) {
+					goto AliasMatched
+				}
+			}
+		}
+		// We failed to match any of the aliases
+		return false
+
+	AliasMatched:
+		// Aliases matched for this element of the key; continue through the elements
+	}
+
+	return true
+}
+
+func aliasedKeyPrefixMatch(ak, prefix aliasedKey) bool {
+	return aliasedKeysMatch(ak[:len(prefix)], prefix)
+}
+
+func findStructField(fields []structField, targetKey aliasedKey) (structField, bool) {
+	for _, field := range fields {
+		if len(field.aliasedKey) != len(targetKey) {
+			// Can't possibly match
+			continue
+		}
+
+		if aliasedKeysMatch(targetKey, field.aliasedKey) {
+			// We found the field
+			return field, true
+		}
+	}
+
+	// We exhausted the search without a match
+	return structField{}, false
+}
+
+func aliasedKeyFromKey(key Key) aliasedKey {
+	result := make(aliasedKey, len(key))
+	for i := range key {
+		result[i] = aliasedKeyElem{key[i]}
+	}
+	return result
 }
 
 /*
