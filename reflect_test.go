@@ -343,13 +343,98 @@ func Test_getStructFields(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "for map",
+			obj: map[string]interface{}{
+				"a": "aaa",
+				"b": 123,
+				"c": time.Now(), // implements encoding.TextUnmarshaler
+				"d": map[string]interface{}{
+					"d1": "d1d1",
+				},
+				"e": []bool{true, false},
+				"f": nil,
+			},
+			want: []structField{
+				{
+					aliasedKey:   aliasedKey{{"f"}},
+					typ:          "interface {}",
+					kind:         "interface",
+					optional:     false,
+					expectedType: "",
+				},
+				{
+					aliasedKey:   aliasedKey{{"a"}},
+					typ:          "string",
+					kind:         "string",
+					optional:     false,
+					expectedType: "",
+				},
+				{
+					aliasedKey:   aliasedKey{{"b"}},
+					typ:          "int",
+					kind:         "int",
+					optional:     false,
+					expectedType: "",
+				},
+				{
+					aliasedKey:   aliasedKey{{"c"}},
+					typ:          "time.Time",
+					kind:         "struct",
+					optional:     false,
+					expectedType: "string",
+				},
+				{
+					aliasedKey:   aliasedKey{{"d"}},
+					typ:          "map[string]interface {}",
+					kind:         "map",
+					optional:     false,
+					expectedType: "",
+				},
+				{
+					aliasedKey:   aliasedKey{{"d"}, {"d1"}},
+					typ:          "string",
+					kind:         "string",
+					optional:     false,
+					expectedType: "",
+				},
+				{
+					aliasedKey:   aliasedKey{{"e"}},
+					typ:          "[]bool",
+					kind:         "slice",
+					optional:     false,
+					expectedType: "",
+				},
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := getStructFields(tt.obj)
 
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Fatalf("getStructFields() = %#v, want %#v", got, tt.want)
+			if len(got) != len(tt.want) {
+				t.Fatalf("length of got and want mismatch;\ngot: %#v;\nwant: %#v", got, tt.want)
+			}
+
+			// The ordering of got vs tt.want is not guaranteed.
+			// Remove from got as we find matches, so we can make sure nothing is missed
+			searchGot := make([]structField, len(got))
+			copy(searchGot, got)
+		WantLoop:
+			for _, w := range tt.want {
+				for i := range searchGot {
+					if reflect.DeepEqual(w, searchGot[i]) {
+						searchGot = append(searchGot[:i], searchGot[i+1:]...)
+						continue WantLoop
+					}
+				}
+
+				// Failed to find a match
+				t.Fatalf("want field unmatched in got: %#v;\ngot %#v", w, got)
+			}
+
+			if len(searchGot) > 0 {
+				t.Fatalf("some got fields not in want: %#v", searchGot)
 			}
 		})
 	}

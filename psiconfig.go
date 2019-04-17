@@ -27,8 +27,10 @@ func (k Key) String() string {
 
 type EnvOverride struct {
 	EnvVar string
-	Key    Key // MUST refer to the key as used in the TOML (as opposed to the struct)
-	Conv   func(envString string) interface{}
+	// MUST refer to the key as used in the TOML (as opposed to the struct).
+	// (If this is problematic, it can be changed, with effort.)
+	Key  Key
+	Conv func(envString string) interface{}
 }
 
 type Contributions map[string]string
@@ -154,14 +156,14 @@ func Load(codec Codec, readers []io.Reader, readerNames []string, envOverrides [
 	mergeMaps(accumConfigMap, envMap, nil)
 
 	// Verify fields one last time on the whole accumulated map, checking absent fields
-	absentFields, err := verifyFieldsConsistency(getStructFields(accumConfigMap), md.structFields)
+	md.absentFields, err = verifyFieldsConsistency(getStructFields(accumConfigMap), md.structFields)
 	if err != nil {
 		// This shouldn't happen, since we've checked all the inputs into accumConfigMap
 		return md, errors.Wrapf(err, "verifyFieldsConsistency failed for merged map")
 	}
 
 	var missingRequiredFields []structField
-	for _, f := range absentFields {
+	for _, f := range md.absentFields {
 		if !f.optional {
 			missingRequiredFields = append(missingRequiredFields, f)
 		}
@@ -236,8 +238,8 @@ func mergeMaps(dst, src map[string]interface{}, keyPrefix Key) (keysMerged []Key
 // 3. Absent fields (required or optional). Return this, but don't error on it.
 func verifyFieldsConsistency(check, gold []structField) (absentFields []structField, err error) {
 	// Start by treating all the gold fields as absent, then remove them as we hit them
-	absentFields = make([]structField, len(gold))
-	copy(absentFields, gold)
+	absentFieldsCandidates := make([]structField, len(gold))
+	copy(absentFieldsCandidates, gold)
 
 	var skipPrefixes []aliasedKey
 
@@ -245,15 +247,6 @@ CheckFieldsLoop:
 	for _, checkField := range check {
 		for _, skipPrefix := range skipPrefixes {
 			if aliasedKeyPrefixMatch(checkField.aliasedKey, skipPrefix) {
-				// Keys skipped due to skipPrefix do not cound as "absent".
-				// So remove checkField from absentFields (if present).
-				for i := range absentFields {
-					if aliasedKeysMatch(absentFields[i].aliasedKey, checkField.aliasedKey) {
-						absentFields = append(absentFields[:i], absentFields[i+1:]...)
-						break
-					}
-				}
-
 				continue CheckFieldsLoop
 			}
 		}
@@ -263,10 +256,10 @@ CheckFieldsLoop:
 			return nil, errors.Errorf("field in config not found in struct: %+v", checkField)
 		}
 
-		// Remove goldField from absentFields
-		for i := range absentFields {
-			if aliasedKeysMatch(absentFields[i].aliasedKey, goldField.aliasedKey) {
-				absentFields = append(absentFields[:i], absentFields[i+1:]...)
+		// Remove goldField from absentFieldsCandidates
+		for i := range absentFieldsCandidates {
+			if aliasedKeysMatch(absentFieldsCandidates[i].aliasedKey, goldField.aliasedKey) {
+				absentFieldsCandidates = append(absentFieldsCandidates[:i], absentFieldsCandidates[i+1:]...)
 				break
 			}
 		}
@@ -279,6 +272,20 @@ CheckFieldsLoop:
 		if noDeeper {
 			skipPrefixes = append(skipPrefixes, checkField.aliasedKey)
 		}
+	}
+
+	// Keys skipped due to skipPrefix do not cound as "absent", so remove any matches
+	// from absentFieldsCandidates that didn't get processed above.
+	absentFields = make([]structField, 0)
+AbsentSkipLoop:
+	for _, absent := range absentFieldsCandidates {
+		for _, skipPrefix := range skipPrefixes {
+			if aliasedKeyPrefixMatch(absent.aliasedKey, skipPrefix) {
+				continue AbsentSkipLoop
+			}
+		}
+		// Doesn't match any skip prefixes
+		absentFields = append(absentFields, absent)
 	}
 
 	return absentFields, nil
@@ -303,35 +310,40 @@ func fieldTypesConsistent(check, gold structField) (noDeeper bool, err error) {
 		// along this branch of the tree.
 		// For example, a struct that supports UnmarshalText (with explicit type "string")
 		// might have sub-fields that shouldn't be included in the consistency check.
-		noDeeper = true
-		return false, nil
+		return true, nil
 	}
 
 	// Exact match
 	if check.typ == gold.typ || check.typ == gold.kind {
-		return true, nil
+		return false, nil
 	}
 
 	// E.g., if there's a "*string" in the gold and a "string" in the check, that's fine
 	if gold.typ == "*"+check.typ {
-		return true, nil
+		return false, nil
 	}
 
 	if gold.kind == "struct" && check.kind == "map" {
-		return true, nil
+		return false, nil
 	}
 
 	// We'll treat different int sizes as equivalent.
 	// If values are too big for specified types, an error will occur
 	// when unmarshalling.
 	if strings.HasPrefix(gold.kind, "int") && strings.HasPrefix(check.kind, "int") {
-		return true, nil
+		return false, nil
 	}
 
 	// We'll treat different float sizes as equivalent.
 	// If values are too big for specified types, an error will occur
 	// when unmarshalling.
 	if strings.HasPrefix(gold.kind, "float") && strings.HasPrefix(check.kind, "float") {
+		return false, nil
+	}
+
+	// We don't check types inside a slice.
+	// TODO: Type checking inside slices.
+	if gold.kind == "slice" && check.kind == "slice" {
 		return true, nil
 	}
 

@@ -1,6 +1,6 @@
 # psiphon-go-config
 
-TODO: A type mismatch between struct and TOML results in a zero value in the struct. TOML.MD will say the field _is_ defined. Can we detect this mismatch?
+TODO: Does IsDefined return error if the whole sub-struct is absent? (Or only for pointer-to-struct?)
 
 // NOTE: BurntSushi has UnmarshalText override-ability, so we get that for free. It should be noted in the doc.
 
@@ -21,3 +21,7 @@ func(v interface{}) ([]byte, error) {
 ```
 
 Different field aliases on toml and json tags is undefined behaviour.
+
+## Future work
+
+* Type checking inside slices

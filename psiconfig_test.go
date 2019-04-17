@@ -1,9 +1,11 @@
 package psiconfig
 
 import (
+	"encoding"
 	"io"
 	"os"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -372,6 +374,18 @@ func Test_setMapLeafFromMap(t *testing.T) {
 }
 */
 
+type textUnmarshalType struct {
+	ExportedString string
+	ExportedInt    int
+}
+
+func (tut *textUnmarshalType) UnmarshalText(text []byte) error {
+	tut.ExportedString = string(text)
+	return nil
+}
+
+var _ encoding.TextUnmarshaler = &textUnmarshalType{}
+
 func TestLoad_TOML(t *testing.T) {
 	codec := Codec{
 		Marshal: func(v interface{}) ([]byte, error) {
@@ -386,26 +400,39 @@ func TestLoad_TOML(t *testing.T) {
 		Unmarshal: toml.Unmarshal,
 	}
 
+	type stringAlias string
+	type boolAlias bool
+
 	type simpleStruct struct {
 		A1 string
 		B1 int
 	}
+	type subStruct struct {
+		A  string       `psiconfig:"optional"`
+		S1 simpleStruct `toml:"sect1" psiconfig:"optional"`
+		S2 simpleStruct `toml:"sect2" psiconfig:"optional"`
+	}
 	type tagStruct struct {
-		B2 int    `toml:"bee_two,omitempty" psiconfig:"optional,string"`
-		C2 string `json:"cee_two" psiconfig:",bool"`
-		D2 string `toml:"-"`
+		A stringAlias `toml:"eh,omitempty" psiconfig:"optional,string"`
+		B boolAlias   `json:"bee" toml:"bee" psiconfig:","`
+		C string      `toml:"-"`
+		D float32     `psiconfig:"optional"`
 	}
 	type advancedTypesStruct struct {
-		A3 *string
-		B3 []int
-		C3 simpleStruct `toml:"cee_three"`
-		D3 []simpleStruct
-		E3 time.Time
+		A *string
+		B []int
+		C simpleStruct `toml:"cee_three"`
+		D []simpleStruct
+		E time.Time
+		F textUnmarshalType
 	}
 	type comboStruct struct {
 		Simple simpleStruct
 		Tag    tagStruct
 		Adv    advancedTypesStruct
+	}
+	type hardTypeStruct struct {
+		F float64 `psiconfig:",float32"` // BurntSushi/toml will never give us float32, so this should never match
 	}
 
 	type args struct {
@@ -427,18 +454,10 @@ func TestLoad_TOML(t *testing.T) {
 	tests := make([]test, 0)
 	var tst test
 
-	makeReaders := func(ss []string) []io.Reader {
-		res := make([]io.Reader, len(ss))
-		for i := range ss {
-			res[i] = strings.NewReader(ss[i])
-		}
-		return res
-	}
-
 	//----------------------------------------------------------------------
 	tst = test{}
 	tst.name = "simple"
-	tst.args.readers = makeReaders([]string{
+	tst.args.readers = makeStringReaders([]string{
 		`
 		B1 = 123
 		a1 = "aa"
@@ -467,241 +486,398 @@ func TestLoad_TOML(t *testing.T) {
 		{"X"},
 	}
 	tests = append(tests, tst)
-	/*
-		//----------------------------------------------------------------------
-		tst = test{}
-		tst.name = "multi-reader"
-		tst.args.readers = makeReaders([]string{
-			`
-			a = "aa"
-			b = 22
-			[sect1]
-			a1 = "aa11"
-			`,
-			`
-			a = "aaa"
-			`,
-			`
-			[sect1]
-			a1 = "aaa111"
-			`,
-		})
-		tst.args.readerNames = []string{"first", "second", "third"}
-		tst.args.envOverrides = nil
-		tst.wantConfig = configStruct{
-			A: "aaa",
-			B: 22,
-			Sect1: subStruct1{
-				A1: "aaa111",
+
+	//----------------------------------------------------------------------
+	tst = test{}
+	tst.name = "multi-reader"
+	tst.args.readers = makeStringReaders([]string{
+		`
+		[sect1]
+		a1 = "sect1.a1 from first reader"
+		[sect2]
+		a1 = "sect2.a1 from first reader"
+		`,
+		`
+		[sect1]
+		b1 = 21
+		[sect2]
+		b1 = 22
+		`,
+		`
+		[sect1]
+		a1 = "sect1.a1 from third reader"
+		[sect2]
+		b1 = 32
+		`,
+	})
+	tst.args.readerNames = []string{"first", "second", "third"}
+	tst.args.envOverrides = nil
+	tst.wantConfig = subStruct{
+		S1: simpleStruct{
+			A1: "sect1.a1 from third reader",
+			B1: 21,
+		},
+		S2: simpleStruct{
+			A1: "sect2.a1 from first reader",
+			B1: 32,
+		},
+	}
+	tst.wantErr = false
+	tst.wantContributions = Contributions{
+		"sect1.a1": "third",
+		"sect1.b1": "second",
+		"sect2.a1": "first",
+		"sect2.b1": "third",
+	}
+	tst.wantIsDefineds = []Key{
+		{"sect1"}, {"Sect1"},
+		{"sect2"}, {"Sect2"},
+		{"sect1", "a1"}, {"Sect1", "A1"},
+		{"Sect1", "a1"}, {"sect1", "A1"},
+		{"sect1", "b1"}, {"Sect1", "B1"},
+		{"Sect1", "b1"}, {"sect1", "B1"},
+		{"sect2", "a1"}, {"Sect2", "A1"},
+		{"Sect2", "a1"}, {"sect2", "A1"},
+		{"sect2", "b1"}, {"Sect2", "B1"},
+		{"Sect2", "b1"}, {"sect1", "B1"},
+	}
+	tst.wantNotIsDefineds = []Key{{"A"}}
+	tst.wantErrIsDefineds = nil
+	tests = append(tests, tst)
+
+	//----------------------------------------------------------------------
+	tst = test{}
+	tst.name = "env override"
+	tst.args.readers = makeStringReaders([]string{
+		`
+		[sect1]
+		a1 = "s1.a1 from file"
+		b1 = 111
+		[sect2]
+		a1 = "s2.a1 from file"
+		b1 = 222
+		`,
+	})
+	tst.args.readerNames = []string{"first"}
+	tst.args.envOverrides = []EnvOverride{
+		{
+			EnvVar: "S1B1_FROM_ENV",
+			Key:    Key{"sect1", "b1"},
+			Conv: func(v string) interface{} {
+				i, _ := strconv.Atoi(v)
+				return i
 			},
-		}
-		tst.wantErr = false
-		tst.wantContributions = Contributions{
-			"a":        "second",
-			"b":        "first",
-			"sect1.a1": "third",
-		}
-		tst.wantIsDefineds = []Key{
-			{"a"},
-			{"A"},
-			{"b"},
-			{"B"},
-			{"sect1", "a1"},
-			{"Sect1", "A1"},
-			{"Sect1", "a1"},
-			{"sect1", "A1"},
-		}
-		tst.wantNotIsDefineds = nil
-		tst.wantErrIsDefineds = nil
-		tests = append(tests, tst)
-		//----------------------------------------------------------------------
-		tst = test{}
-		tst.name = "env override"
-		tst.args.readers = makeReaders([]string{
-			`
-			a = "aa"
-			b = 22
-			[sect1]
-			a1 = "a1a1"
-			`,
-		})
-		tst.args.readerNames = []string{"first"}
-		tst.args.envOverrides = []EnvOverride{
-			{
-				EnvVar: "ENVB",
-				Key:    Key{"b"},
-				Conv: func(v string) interface{} {
-					i, _ := strconv.Atoi(v)
-					return i
-				},
+		},
+		{
+			EnvVar: "S2A1_FROM_ENV",
+			Key:    Key{"sect2", "a1"},
+			Conv:   nil,
+		},
+		{
+			EnvVar: "WILL_BE_UNUSED",
+			Key:    Key{"sect1", "a1"},
+			Conv:   nil,
+		},
+	}
+	tst.env = map[string]string{
+		"S1B1_FROM_ENV": "333333",
+		"S2A1_FROM_ENV": "from env",
+	}
+	tst.wantConfig = subStruct{
+		S1: simpleStruct{
+			A1: "s1.a1 from file",
+			B1: 333333,
+		},
+		S2: simpleStruct{
+			A1: "from env",
+			B1: 222,
+		},
+	}
+	tst.wantErr = false
+	tst.wantContributions = Contributions{
+		"sect1.a1": "first",
+		"sect1.b1": "$S1B1_FROM_ENV",
+		"sect2.a1": "$S2A1_FROM_ENV",
+		"sect2.b1": "first",
+	}
+	tst.wantIsDefineds = nil
+	tst.wantNotIsDefineds = nil
+	tst.wantErrIsDefineds = nil
+	tests = append(tests, tst)
+
+	//----------------------------------------------------------------------
+	tst = test{}
+	tst.name = "error: vestigial key"
+	tst.args.readers = makeStringReaders([]string{
+		`
+		a1 = "aa"
+		b1 = 22
+		c1 = "nope"
+		`,
+	})
+	tst.wantConfig = simpleStruct{}
+	tst.args.readerNames = []string{"first"}
+	tst.wantErr = true
+	tests = append(tests, tst)
+
+	//----------------------------------------------------------------------
+	tst = test{}
+	tst.name = "error: missing required key"
+	tst.args.readers = makeStringReaders([]string{
+		`
+		a1 = "aa"
+		`,
+	})
+	tst.wantConfig = simpleStruct{}
+	tst.args.readerNames = []string{"first"}
+	tst.wantErr = true
+	tests = append(tests, tst)
+
+	//----------------------------------------------------------------------
+	tst = test{}
+	tst.name = "tags"
+	tst.args.readers = makeStringReaders([]string{
+		`
+		bee = true
+		D = 1.2
+		`,
+	})
+	tst.args.readerNames = nil
+	tst.args.envOverrides = nil
+	tst.wantConfig = tagStruct{
+		B: true,
+		D: 1.2,
+	}
+	tst.wantErr = false
+	tst.wantContributions = Contributions{
+		"bee": "0",
+		"D":   "0",
+	}
+	tst.wantIsDefineds = []Key{
+		{"bee"}, {"b"}, {"B"},
+	}
+	tst.wantNotIsDefineds = []Key{
+		{"A"}, {"a"},
+	}
+	tst.wantErrIsDefineds = []Key{
+		{"c"}, {"C"},
+	}
+	tests = append(tests, tst)
+
+	//----------------------------------------------------------------------
+	tst = test{}
+	tst.name = "advanced types"
+	tst.args.readers = makeStringReaders([]string{
+		`
+		A = "aaaa"
+		B = [1, 1, 2, 3, 5]
+		E = "2001-01-01T01:01:01Z"
+		F = "my text"
+		[cee_three]
+		a1 = "a1a1"
+		b1 = 321
+		[[D]]
+		a1 = "1"
+		b1 = 1
+		[[D]]
+		a1 = "2"
+		b1 = 2
+		[[D]]
+		a1 = "3"
+		b1 = 3
+		`,
+	})
+	tst.args.readerNames = nil
+	tst.args.envOverrides = nil
+	aString := "aaaa"
+	eTime, _ := time.Parse(time.RFC3339, "2001-01-01T01:01:01Z")
+	tst.wantConfig = advancedTypesStruct{
+		A: &aString,
+		B: []int{1, 1, 2, 3, 5},
+		C: simpleStruct{
+			A1: "a1a1",
+			B1: 321,
+		},
+		D: []simpleStruct{
+			{A1: "1", B1: 1},
+			{A1: "2", B1: 2},
+			{A1: "3", B1: 3},
+		},
+		E: eTime,
+		F: textUnmarshalType{
+			ExportedString: "my text",
+		},
+	}
+	tst.wantErr = false
+	tst.wantContributions = Contributions{
+		"A":            "0",
+		"B":            "0",
+		"D":            "0",
+		"E":            "0",
+		"F":            "0",
+		"cee_three.a1": "0",
+		"cee_three.b1": "0",
+	}
+	tst.wantIsDefineds = []Key{
+		{"C", "A1"},
+		{"c", "a1"},
+		{"cee_three", "a1"},
+		{"F", "ExportedString"}, // Not explicity defined, but implicitly by F's text-unmarshalling
+	}
+	tst.wantNotIsDefineds = []Key{}
+	tst.wantErrIsDefineds = []Key{}
+	tests = append(tests, tst)
+
+	//----------------------------------------------------------------------
+	tst = test{}
+	// BurntSushi/toml will fill the struct with zero values and give no error
+	type structWithString struct {
+		F string
+	}
+	type structWithSub struct {
+		Struct structWithString
+	}
+	tst.name = "wrong type for struct"
+	tst.args.readers = makeStringReaders([]string{
+		`
+		Struct = "string is the wrong type"
+		`,
+	})
+	tst.args.readerNames = nil
+	tst.args.envOverrides = nil
+	tst.wantConfig = structWithSub{}
+	tst.wantErr = true
+	tests = append(tests, tst)
+
+	//----------------------------------------------------------------------
+	tst = test{}
+	tst.name = "error: multi-reader name mismatch"
+	tst.args.readers = makeStringReaders([]string{
+		`
+		[sect1]
+		a1 = "sect1.a1 from first reader"
+		[sect2]
+		a1 = "sect2.a1 from first reader"
+		`,
+		`
+		[sect1]
+		b1 = 21
+		[sect2]
+		b1 = 22
+		`,
+		`
+		[sect1]
+		a1 = "sect1.a1 from third reader"
+		[sect2]
+		b1 = 32
+		`,
+	})
+	tst.args.readerNames = []string{"first", "second", "third", "invalid"}
+	tst.args.envOverrides = nil
+	tst.wantConfig = subStruct{}
+	tst.wantErr = true
+	tests = append(tests, tst)
+
+	//----------------------------------------------------------------------
+	tst = test{}
+	tst.name = "error: bad toml"
+	tst.args.readers = makeStringReaders([]string{
+		`
+		not really TOML
+		`,
+	})
+	tst.args.readerNames = []string{"first"}
+	tst.wantConfig = subStruct{}
+	tst.wantErr = true
+	tests = append(tests, tst)
+
+	//----------------------------------------------------------------------
+	tst = test{}
+	tst.name = "error: env override with unfindable key"
+	tst.args.readers = makeStringReaders([]string{
+		`
+		[sect1]
+		a1 = "s1.a1 from file"
+		b1 = 111
+		[sect2]
+		a1 = "s2.a1 from file"
+		b1 = 222
+		`,
+	})
+	tst.args.readerNames = []string{"first"}
+	tst.args.envOverrides = []EnvOverride{
+		{
+			EnvVar: "S1B1_FROM_ENV",
+			Key:    Key{"sect1", "b1"},
+			Conv: func(v string) interface{} {
+				i, _ := strconv.Atoi(v)
+				return i
 			},
-			{
-				EnvVar: "ENVA1",
-				Key:    Key{"sect1", "a1"},
-				Conv:   nil,
+		},
+		{
+			EnvVar: "BAD_KEY",
+			Key:    Key{"sect1", "nope"},
+			Conv:   nil,
+		},
+	}
+	tst.env = map[string]string{
+		"S1B1_FROM_ENV": "333333",
+		"BAD_KEY":       "erroneous",
+	}
+	tst.wantConfig = subStruct{}
+	tst.wantErr = true
+	tests = append(tests, tst)
+
+	//----------------------------------------------------------------------
+	tst = test{}
+	tst.name = "error: env override with empty key"
+	tst.args.readers = makeStringReaders([]string{
+		`
+		[sect1]
+		a1 = "s1.a1 from file"
+		b1 = 111
+		[sect2]
+		a1 = "s2.a1 from file"
+		b1 = 222
+		`,
+	})
+	tst.args.readerNames = []string{"first"}
+	tst.args.envOverrides = []EnvOverride{
+		{
+			EnvVar: "S1B1_FROM_ENV",
+			Key:    Key{"sect1", "b1"},
+			Conv: func(v string) interface{} {
+				i, _ := strconv.Atoi(v)
+				return i
 			},
-		}
-		tst.env = map[string]string{
-			"ENVB":  "123",
-			"ENVA1": "fromenv",
-		}
-		tst.wantConfig = configStruct{
-			A: "aa",
-			B: 123,
-			Sect1: subStruct1{
-				A1: "fromenv",
-			},
-		}
-		tst.wantErr = false
-		tst.wantContributions = Contributions{
-			"a":        "first",
-			"b":        "$ENVB",
-			"sect1.a1": "$ENVA1",
-		}
-		tst.wantIsDefineds = []Key{
-			{"a"},
-			{"A"},
-			{"b"},
-			{"B"},
-			{"sect1", "a1"},
-			{"Sect1", "A1"},
-		}
-		tst.wantNotIsDefineds = nil
-		tst.wantErrIsDefineds = nil
-		tests = append(tests, tst)
-		//----------------------------------------------------------------------
-		tst = test{}
-		tst.name = "error: vestigial key"
-		tst.args.readers = makeReaders([]string{
-			`
-			a = "aa"
-			b = 22
-			c = "nope"
-			`,
-		})
-		tst.args.readerNames = []string{"first"}
-		tst.wantErr = true
-		tests = append(tests, tst)
-		//----------------------------------------------------------------------
-		tst = test{}
-		tst.name = "complex"
-		tst.args.readers = makeReaders([]string{
-			`
-			a = "aa"
-			date = "2011-01-01T01:01:01.01Z"
-			[sect1]
-			a1 = "aa11"
-			B1 = 122
-			[SectTwo]
-			a2 = "aa22"
-			bee_two = 234
-			cee_two = "from first"
-			[Sect3]
-			A3 = "aa33"
-			b3 = [3, 2, 1]
-			[[Sect3.c3]]
-			subc = "ccc333"
-			[[Sect3.c3]]
-			subc = "cccc3333"
-			`,
-			`
-			[SectTwo]
-			a2 = "a2 override"
-			bee_two = 567
-			[Sect3]
-			[[Sect3.c3]]
-			subc = "c3 1 override"
-			[[Sect3.c3]]
-			subc = "c3 2 override"
-			[[Sect3.c3]]
-			subc = "c3 3 override"
-			`,
-		})
-		tst.args.readerNames = []string{"first", "second"}
-		tst.args.envOverrides = []EnvOverride{
-			{
-				EnvVar: "S2_A2",
-				Key:    Key{"SectTwo", "a2"},
-				Conv:   nil,
-			},
-			{
-				EnvVar: "CEE2",
-				Key:    Key{"SectTwo", "cee_two"},
-				Conv:   nil,
-			},
-			{
-				EnvVar: "WONT_FIND",
-				Key:    Key{"a"},
-				Conv:   nil,
-			},
-			{
-				EnvVar: "ENVB",
-				Key:    Key{"b"},
-				Conv: func(v string) interface{} {
-					i, _ := strconv.Atoi(v)
-					return i
-				},
-			},
-		}
-		tst.env = map[string]string{
-			"ENVB":  "22",
-			"S2_A2": "SectTwo.A2 from env",
-			"CEE2":  "SectTwo.cee_two from env",
-		}
-		s3_a3 := "aa33"
-		tst.wantConfig = configStruct{
-			A:    "aa",
-			B:    22,
-			Date: time.Date(2011, time.January, 1, 1, 1, 1, 1000, time.UTC),
-			Sect1: subStruct1{
-				A1: "aa11",
-				B1: 122,
-			},
-			Sect2: subStruct2{
-				A2: "SectTwo.A2 from env",
-				B2: 567,
-				C2: "SectTwo.cee_two from env",
-			},
-			Sect3: subStruct3{
-				A3: &s3_a3,
-				B3: []int{3, 2, 1},
-				C3: []subStruct3_1{
-					{SubC: "c3 1 override"},
-					{SubC: "c3 2 override"},
-					{SubC: "c3 3 override"},
-				},
-			},
-		}
-		tst.wantErr = false
-		tst.wantContributions = Contributions{
-			"a":               "first",
-			"b":               "$ENVB",
-			"date":            "first",
-			"sect1.a1":        "first",
-			"sect1.B1":        "first",
-			"SectTwo.a2":      "$S2_A2",
-			"SectTwo.bee_two": "second",
-			"SectTwo.cee_two": "$CEE2",
-			"Sect3.A3":        "first",
-			"Sect3.b3":        "first",
-			"Sect3.c3":        "second",
-		}
-		tst.wantIsDefineds = []Key{
-			{"a"},
-			{"b"},
-			{"sect1", "a1"},
-			{"sect1", "B1"},
-			{"SectTwo", "a2"},
-			{"SectTwo", "B2"},
-			{"SectTwo", "cee_two"},
-			{"sect3", "a3"},
-			{"Sect3", "b3"},
-			{"Sect3", "C3"},
-		}
-		tst.wantNotIsDefineds = nil
-		tst.wantErrIsDefineds = nil
-		tests = append(tests, tst)
-	*/
+		},
+		{
+			EnvVar: "BAD_KEY",
+			Key:    Key{},
+			Conv:   nil,
+		},
+	}
+	tst.env = map[string]string{
+		"S1B1_FROM_ENV": "333333",
+		"BAD_KEY":       "erroneous",
+	}
+	tst.wantConfig = subStruct{}
+	tst.wantErr = true
+	tests = append(tests, tst)
+
+	//----------------------------------------------------------------------
+	tst = test{}
+	tst.name = "error: explicit type fail"
+	tst.args.readers = makeStringReaders([]string{
+		`
+		F = 1.2
+		`,
+	})
+	tst.wantConfig = hardTypeStruct{}
+	tst.wantErr = true
+	tests = append(tests, tst)
+
+	//----------------------------------------------------------------------
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -722,8 +898,9 @@ func TestLoad_TOML(t *testing.T) {
 				return
 			}
 
-			if !reflect.DeepEqual(reflect.ValueOf(resultPtr).Elem().Interface(), tt.wantConfig) {
-				t.Fatalf("result did not match;\ngot  %#v\nwant %#v", resultPtr, tt.wantConfig)
+			resultComparator := reflect.ValueOf(resultPtr).Elem().Interface()
+			if !reflect.DeepEqual(resultComparator, tt.wantConfig) {
+				t.Fatalf("result did not match;\ngot  %#v\nwant %#v\nmd: %+v", resultComparator, tt.wantConfig, gotMD)
 			}
 
 			if !reflect.DeepEqual(gotMD.Contributions, tt.wantContributions) {
@@ -959,4 +1136,49 @@ func Test_findStructField(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestLoad_BadArgs(t *testing.T) {
+	codec := Codec{
+		Marshal: func(v interface{}) ([]byte, error) {
+			sb := &strings.Builder{}
+			enc := toml.NewEncoder(sb)
+			err := enc.Encode(v)
+			if err != nil {
+				return nil, err
+			}
+			return []byte(sb.String()), nil
+		},
+		Unmarshal: toml.Unmarshal,
+	}
+
+	type Struct struct {
+		A string
+	}
+
+	var notPtr Struct
+
+	_, gotErr := Load(codec, makeStringReaders([]string{"\na=1\n"}), nil, nil, notPtr)
+
+	// Didn't pass in &notPtr, so should get error
+	if gotErr == nil {
+		t.Fatal("Should have got error for not passing in reference")
+	}
+
+	var nilPtr *Struct
+
+	_, gotErr = Load(codec, makeStringReaders([]string{"\na=1\n"}), nil, nil, nilPtr)
+
+	// Passing in nil, so should get error
+	if gotErr == nil {
+		t.Fatal("Should have got error for passing in nil")
+	}
+}
+
+func makeStringReaders(ss []string) []io.Reader {
+	res := make([]io.Reader, len(ss))
+	for i := range ss {
+		res[i] = strings.NewReader(ss[i])
+	}
+	return res
 }

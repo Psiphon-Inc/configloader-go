@@ -6,11 +6,13 @@ import (
 	"strings"
 )
 
-var textUnmarshalerType = reflect.TypeOf((*encoding.TextUnmarshaler)(nil)).Elem()
-
+// One component of an aliased key. Contains equivalent aliases for this component.
 type aliasedKeyElem []string
+
+// A key that can be written multiple ways, all of which should match. Each element may have aliases.
 type aliasedKey []aliasedKeyElem
 
+// Information about field in a struct
 type structField struct {
 	aliasedKey   aliasedKey
 	typ          string
@@ -19,17 +21,89 @@ type structField struct {
 	expectedType string
 }
 
-func (sf structField) copy() structField {
-	newSF := sf
-	newSF.aliasedKey = make(aliasedKey, len(sf.aliasedKey))
-	copy(newSF.aliasedKey, sf.aliasedKey)
-	return newSF
-}
+/*
+getStructFields returns the Exported fields found in obj.
+The returned slice is guaranteed to have branches before leaves.
 
+Example with struct:
+	type S struct {
+		F     string `toml:"eff" psiconfig:"optional"`
+		Inner struct {
+			InnerF int
+		}
+		Time time.Time // implements encoding.UnmarshalText
+
+		unexported string
+	}
+
+	var s S
+	fmt.Printf("%+v\n", getStructFields(s))
+Result:
+	[{
+		aliasedKey: [
+			[F eff]
+		] typ: string kind: string optional: true expectedType:
+	} {
+		aliasedKey: [
+			[Inner]
+		] typ: struct {
+			InnerF int
+		}
+		kind: struct optional: false expectedType:
+	} {
+		aliasedKey: [
+			[Inner][InnerF]
+		] typ: int kind: int optional: false expectedType:
+	} {
+		aliasedKey: [
+			[Time]
+		] typ: time.Time kind: struct optional: false expectedType: string
+	}]
+
+Example with map:
+	m := map[string]interface{}{
+	    "a": "aaa",
+	    "b": 123,
+	    "c": time.Now(),
+	    "d": map[string]interface{}{
+	        "d1": "d1d1",
+	    },
+	    "e": []bool{true, false},
+	}
+	fmt.Printf("%+v\n", getStructFields(m))
+Result:
+	[{
+		aliasedKey: [
+			[a]
+		] typ: string kind: string optional: false expectedType:
+	} {
+		aliasedKey: [
+			[b]
+		] typ: int kind: int optional: false expectedType:
+	} {
+		aliasedKey: [
+			[c]
+		] typ: time.Time kind: struct optional: false expectedType: string
+	} {
+		aliasedKey: [
+			[d]
+		] typ: map[string] interface {}
+		kind: map optional: false expectedType:
+	} {
+		aliasedKey: [
+			[d][d1]
+		] typ: string kind: string optional: false expectedType:
+	} {
+		aliasedKey: [
+			[e]
+		] typ: [] bool kind: slice optional: false expectedType:
+	}]
+*/
 func getStructFields(obj interface{}) []structField {
 	return getStructFieldsRecursive(reflect.ValueOf(obj), structField{})
 }
 
+// Recursion helper for getStructFields.
 func getStructFieldsRecursive(structValue reflect.Value, currField structField) []structField {
 	switch structValue.Kind() {
 	case reflect.Ptr:
@@ -96,7 +170,18 @@ func getStructFieldsRecursive(structValue reflect.Value, currField structField) 
 	return []structField{}
 }
 
-func makeField(keyPrefix aliasedKey, name string, structTag *reflect.StructTag, v reflect.Value) (sf *structField, recurseValue *reflect.Value) {
+// Derive this once to use for checking implementation of encoding.TextUnmarshaler below.
+var textUnmarshalerType = reflect.TypeOf((*encoding.TextUnmarshaler)(nil)).Elem()
+
+// Make a structField with the given parameters.
+// Return value sf will be nil if the field should be ignored.
+// Return value recurseValue will be non-nil if the field should be recursed into (such as
+// for maps and structs). recurseValue may be different than v, as unwrapping may have occurred
+// (such as for pointers and interfaces).
+func makeField(keyPrefix aliasedKey, name string, structTag *reflect.StructTag, v reflect.Value,
+) (
+	sf *structField, recurseValue *reflect.Value,
+) {
 	if structTag != nil && isStructFieldIgnored(*structTag) {
 		return nil, nil
 	}
