@@ -1,4 +1,4 @@
-package psiconfig
+package reflection
 
 import (
 	"encoding"
@@ -6,28 +6,43 @@ import (
 	"strings"
 )
 
+type Codec interface {
+	// Returns true if the struct tag indicates that the field is not unmarshaled (like `json:"-"`)
+	IsStructFieldIgnored(st reflect.StructTag) bool
+
+	// Returns name of the field in the config file (like `json:"new_name"`)
+	// or empty string if the field has no alias
+	GetStructFieldAlias(st reflect.StructTag) string
+}
+
 // One component of an aliased key. Contains equivalent aliases for this component.
-type aliasedKeyElem []string
+type AliasedKeyElem []string
 
 // A key that can be written multiple ways, all of which should match. Each element may have aliases.
-type aliasedKey []aliasedKeyElem
+type AliasedKey []AliasedKeyElem
 
 // Information about field in a struct
-type structField struct {
-	aliasedKey   aliasedKey
-	typ          string
-	kind         string
-	optional     bool
-	expectedType string
+type StructField struct {
+	AliasedKey   AliasedKey
+	Type         string
+	Kind         string
+	Optional     bool
+	ExpectedType string
+}
+
+type decoder struct {
+	tagName string
+	codec   Codec
 }
 
 /*
-getStructFields returns the Exported fields found in obj.
+GetStructFields returns the Exported fields found in obj.
 The returned slice is guaranteed to have branches before leaves.
+tagName is the string used to flag "optional" (and set explicit expected type).
 
 Example with struct:
 	type S struct {
-		F     string `toml:"eff" psiconfig:"optional"`
+		F     string `toml:"eff" conf:"optional"`
 		Inner struct {
 			InnerF int
 		}
@@ -37,7 +52,7 @@ Example with struct:
 	}
 
 	var s S
-	fmt.Printf("%+v\n", getStructFields(s))
+	fmt.Printf("%+v\n", GetStructFields(s))
 Result:
 	[{
 		aliasedKey: [
@@ -70,7 +85,7 @@ Example with map:
 	    },
 	    "e": []bool{true, false},
 	}
-	fmt.Printf("%+v\n", getStructFields(m))
+	fmt.Printf("%+v\n", GetStructFields(m))
 Result:
 	[{
 		aliasedKey: [
@@ -99,23 +114,24 @@ Result:
 		] typ: [] bool kind: slice optional: false expectedType:
 	}]
 */
-func getStructFields(obj interface{}) []structField {
-	return getStructFieldsRecursive(reflect.ValueOf(obj), structField{})
+func GetStructFields(obj interface{}, tagName string, codec Codec) []StructField {
+	d := decoder{tagName, codec}
+	return d.getStructFieldsRecursive(reflect.ValueOf(obj), StructField{})
 }
 
-// Recursion helper for getStructFields.
-func getStructFieldsRecursive(structValue reflect.Value, currField structField) []structField {
+// Recursion helper for GetStructFields.
+func (d decoder) getStructFieldsRecursive(structValue reflect.Value, currField StructField) []StructField {
 	switch structValue.Kind() {
 	case reflect.Ptr:
 		// Unwrap and recurse
 		structValue = structValue.Elem()
 		if structValue.IsValid() {
-			return getStructFieldsRecursive(structValue, currField)
+			return d.getStructFieldsRecursive(structValue, currField)
 		}
 
 	// If it is a struct we walk each field
 	case reflect.Struct:
-		structFields := make([]structField, 0)
+		structFields := make([]StructField, 0)
 		for i := 0; i < structValue.NumField(); i++ {
 			field := structValue.Field(i)
 			fieldType := structValue.Type().Field(i)
@@ -124,8 +140,8 @@ func getStructFieldsRecursive(structValue reflect.Value, currField structField) 
 				continue
 			}
 
-			thisField, recurseValue := makeField(
-				currField.aliasedKey,
+			thisField, recurseValue := d.makeField(
+				currField.AliasedKey,
 				fieldType.Name,
 				&fieldType.Tag,
 				field)
@@ -137,19 +153,19 @@ func getStructFieldsRecursive(structValue reflect.Value, currField structField) 
 
 			if recurseValue != nil {
 				// Recurse into the field
-				structFields = append(structFields, getStructFieldsRecursive(*recurseValue, *thisField)...)
+				structFields = append(structFields, d.getStructFieldsRecursive(*recurseValue, *thisField)...)
 			}
 		}
 		return structFields
 
 	// Recurse into maps
 	case reflect.Map:
-		mapFields := make([]structField, 0)
+		mapFields := make([]StructField, 0)
 		for _, key := range structValue.MapKeys() {
 			fieldValue := structValue.MapIndex(key)
 
-			thisField, recurseValue := makeField(
-				currField.aliasedKey,
+			thisField, recurseValue := d.makeField(
+				currField.AliasedKey,
 				key.String(),
 				nil,
 				fieldValue)
@@ -161,28 +177,28 @@ func getStructFieldsRecursive(structValue reflect.Value, currField structField) 
 
 			if recurseValue != nil {
 				// Recurse into the map value
-				mapFields = append(mapFields, getStructFieldsRecursive(*recurseValue, *thisField)...)
+				mapFields = append(mapFields, d.getStructFieldsRecursive(*recurseValue, *thisField)...)
 			}
 		}
 		return mapFields
 	}
 
-	return []structField{}
+	return []StructField{}
 }
 
 // Derive this once to use for checking implementation of encoding.TextUnmarshaler below.
 var textUnmarshalerType = reflect.TypeOf((*encoding.TextUnmarshaler)(nil)).Elem()
 
-// Make a structField with the given parameters.
+// Make a StructField with the given parameters.
 // Return value sf will be nil if the field should be ignored.
 // Return value recurseValue will be non-nil if the field should be recursed into (such as
 // for maps and structs). recurseValue may be different than v, as unwrapping may have occurred
 // (such as for pointers and interfaces).
-func makeField(keyPrefix aliasedKey, name string, structTag *reflect.StructTag, v reflect.Value,
+func (d decoder) makeField(keyPrefix AliasedKey, name string, structTag *reflect.StructTag, v reflect.Value,
 ) (
-	sf *structField, recurseValue *reflect.Value,
+	sf *StructField, recurseValue *reflect.Value,
 ) {
-	if structTag != nil && isStructFieldIgnored(*structTag) {
+	if structTag != nil && d.codec.IsStructFieldIgnored(*structTag) {
 		return nil, nil
 	}
 
@@ -192,37 +208,37 @@ func makeField(keyPrefix aliasedKey, name string, structTag *reflect.StructTag, 
 		vElem := v.Elem()
 		if vElem.IsValid() {
 			// Recurse on the unwrapped value
-			return makeField(keyPrefix, name, structTag, vElem)
+			return d.makeField(keyPrefix, name, structTag, vElem)
 		}
 		// Otherwise it's nil and just fall through
 	}
 
-	sf = &structField{}
+	sf = &StructField{}
 
-	keyElem := aliasedKeyElem{name}
+	keyElem := AliasedKeyElem{name}
 	if structTag != nil {
-		if alias := getStructFieldAlias(*structTag); alias != "" {
+		if alias := d.codec.GetStructFieldAlias(*structTag); alias != "" {
 			keyElem = append(keyElem, alias)
 		}
 
-		tagOpts := strings.Split(structTag.Get(structTagName), ",")
-		sf.optional = (tagOpts[0] == "optional")
+		tagOpts := strings.Split(structTag.Get(d.tagName), ",")
+		sf.Optional = (tagOpts[0] == "optional")
 		if len(tagOpts) > 1 && tagOpts[1] != "" {
-			sf.expectedType = tagOpts[1]
+			sf.ExpectedType = tagOpts[1]
 		}
 	}
 
 	// If the type of v implements encoding.TextUnmarshaler, then we expect a string
 	if reflect.PtrTo(v.Type()).Implements(textUnmarshalerType) {
-		sf.expectedType = "string"
+		sf.ExpectedType = "string"
 	}
 
-	sf.aliasedKey = make(aliasedKey, len(keyPrefix))
-	copy(sf.aliasedKey, keyPrefix)
-	sf.aliasedKey = append(sf.aliasedKey, keyElem)
+	sf.AliasedKey = make(AliasedKey, len(keyPrefix))
+	copy(sf.AliasedKey, keyPrefix)
+	sf.AliasedKey = append(sf.AliasedKey, keyElem)
 
-	sf.kind = kind.String()
-	sf.typ = v.Type().String()
+	sf.Kind = kind.String()
+	sf.Type = v.Type().String()
 
 	recurseValue = nil
 	if kind == reflect.Struct || kind == reflect.Map {
@@ -230,28 +246,4 @@ func makeField(keyPrefix aliasedKey, name string, structTag *reflect.StructTag, 
 	}
 
 	return sf, recurseValue
-}
-
-// Returns true if the struct tag indicates that the field should not be inspected
-func isStructFieldIgnored(st reflect.StructTag) bool {
-	// Both stdlib/json and BurntSushi/toml use "-" to indicate an ignored field.
-	// If we add more supported config formats, we can add more interpretations here.
-	for _, typ := range []string{"toml", "json"} {
-		typeTag := st.Get(typ)
-		if typeTag == "-" {
-			return true
-		}
-	}
-	return false
-}
-
-// Returns empty string if the field has no alias
-func getStructFieldAlias(st reflect.StructTag) string {
-	for _, typ := range []string{"toml", "json"} {
-		typeTag := st.Get(typ)
-		if typeTag != "" {
-			return strings.Split(typeTag, ",")[0]
-		}
-	}
-	return ""
 }

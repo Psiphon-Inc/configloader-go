@@ -8,14 +8,24 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Psiphon-Inc/psiphon-go-config/reflection"
 	"github.com/pkg/errors"
 )
 
-const structTagName = "psiconfig"
+// Used in struct tags like `conf:"optional"`. Can be modified if the caller desires.
+var TagName = "conf"
 
-type Codec struct {
-	Marshal   func(v interface{}) ([]byte, error)
-	Unmarshal func(data []byte, v interface{}) error
+type Codec interface {
+	reflection.Codec
+
+	Marshal(v interface{}) ([]byte, error)
+	Unmarshal(data []byte, v interface{}) error
+
+	// Codec-specific checks (OVER AND ABOVE decoder.fieldTypesConsistent).
+	// For example, encoding.json makes all numbers float64.
+	// noDeeper should be true if the structure should not be checked any deeper.
+	// err must be non-nil if the types are _not_ consistent.
+	FieldTypesConsistent(check, gold reflection.StructField) (noDeeper bool, err error)
 }
 
 type Key []string
@@ -36,24 +46,60 @@ type EnvOverride struct {
 type Contributions map[string]string
 
 type Metadata struct {
-	structFields  []structField
-	absentFields  []structField
+	structFields []reflection.StructField
+	absentFields []reflection.StructField
+	configMap    *map[string]interface{}
+
+	// TODO: comment, mention how to print
 	Contributions Contributions
 }
 
+// TODO: Comment
+// - for maps, never returns error
 func (md *Metadata) IsDefined(key ...string) (bool, error) {
 	aliasedKey := aliasedKeyFromKey(key)
-	_, ok := findStructField(md.absentFields, aliasedKey)
-	if ok {
+
+	// If the key is among the absent fields, then it's not defined.
+	if _, ok := findStructField(md.absentFields, aliasedKey); ok {
 		return false, nil
 	}
 
-	_, ok = findStructField(md.structFields, aliasedKey)
-	if ok {
+	// If it's not absent and it is in the struct, then it is defined.
+	if _, ok := findStructField(md.structFields, aliasedKey); ok {
+		return true, nil
+	}
+
+	// If the result was a map rather than a struct, then we don't have structFields
+	// or absentFields and we'll have to look in the map that was produced.
+	if len(md.structFields) == 0 && md.configMap != nil {
+		currMap := *md.configMap
+		for i := range key {
+			if _, ok := currMap[key[i]]; !ok {
+				return false, nil
+			}
+
+			// The key is in this level of the map.
+			// If this is the last key elem, then we don't need to dig into the map
+			// any deeper, otherwise we do.
+			if i < len(key)-1 {
+				var ok bool
+				currMap, ok = currMap[key[i]].(map[string]interface{})
+				if !ok {
+					// Not a map, so can't dig deeper
+					return false, nil
+				}
+			}
+		}
+
+		// We found all the pieces of the key in the map
 		return true, nil
 	}
 
 	return false, errors.Errorf("key does not exist among known fields: %+v", md.structFields)
+}
+
+type decoder struct {
+	codec Codec
 }
 
 // readers will be used to populate the config. Later readers in the slice will take precedence and clobber the earlier.
@@ -64,6 +110,7 @@ func (md *Metadata) IsDefined(key ...string) (bool, error) {
 // result may be struct or map
 func Load(codec Codec, readers []io.Reader, readerNames []string, envOverrides []EnvOverride, result interface{},
 ) (md Metadata, err error) {
+	decoder := decoder{codec}
 
 	if readerNames != nil && len(readerNames) != len(readers) {
 		return md, errors.New("readerNames must be nil or the same length as readers")
@@ -77,18 +124,25 @@ func Load(codec Codec, readers []io.Reader, readerNames []string, envOverrides [
 		return md, errors.Errorf("result is nil %s", reflect.TypeOf(result))
 	}
 
-	// If result is a map, clear it out, otherwise our field checking will be broken
-	if _, ok := (result).(*map[string]interface{}); ok {
-		m := make(map[string]interface{})
-		result = &m
+	// If result is a map, clear it out, otherwise our field checking will be broken.
+	// Consistency checks are not possible when the result is a map rather than a struct,
+	// so record that it is for later branching.
+	resultIsMap := false
+	if resultMap, ok := (result).(*map[string]interface{}); ok {
+		for k := range *resultMap {
+			delete(*resultMap, k)
+		}
+
+		resultIsMap = true
 	}
 
 	// Get info about the struct being populated. If result is actually a map and not a
 	// struct, this will be empty.
-	md.structFields = getStructFields(result)
+	md.structFields = reflection.GetStructFields(result, TagName, codec)
 
 	md.Contributions = make(map[string]string)
 
+	// We'll use this to build up the combined config map
 	accumConfigMap := make(map[string]interface{})
 
 	// Get the config (file) data from the readers
@@ -103,19 +157,19 @@ func Load(codec Codec, readers []io.Reader, readerNames []string, envOverrides [
 			return md, errors.Wrapf(err, "ioutil.ReadAll failed for config reader '%s'", readerName)
 		}
 
-		s := string(b)
-		_ = s
-
 		var newConfigMap map[string]interface{}
 		err = codec.Unmarshal(b, &newConfigMap)
 		if err != nil {
 			return md, errors.Wrapf(err, "codec.Unmarshal failed for config reader '%s'", readerName)
 		}
 
-		// We ignore absentFields for now. Just checking types and vestigials.
-		_, err = verifyFieldsConsistency(getStructFields(newConfigMap), md.structFields)
-		if err != nil {
-			return md, errors.Wrapf(err, "verifyFieldsConsistency failed for config reader '%s'", readerName)
+		if !resultIsMap {
+			// We ignore absentFields for now. Just checking types and vestigials.
+			_, err = decoder.verifyFieldsConsistency(
+				reflection.GetStructFields(newConfigMap, TagName, codec), md.structFields)
+			if err != nil {
+				return md, errors.Wrapf(err, "verifyFieldsConsistency failed for config reader '%s'", readerName)
+			}
 		}
 
 		// Merge the new map into the accum map, and collect contributor info
@@ -146,25 +200,40 @@ func Load(codec Codec, readers []io.Reader, readerNames []string, envOverrides [
 		md.Contributions[eo.Key.String()] = "$" + eo.EnvVar
 	}
 
-	// We ignore absentFields for now. Just checking types and vestigials.
-	_, err = verifyFieldsConsistency(getStructFields(envMap), md.structFields)
-	if err != nil {
-		return md, errors.Wrapf(err, "verifyFieldsConsistency failed for env overrides")
+	if !resultIsMap {
+		// We ignore absentFields for now. Just checking types and vestigials.
+		_, err = decoder.verifyFieldsConsistency(
+			reflection.GetStructFields(envMap, TagName, codec), md.structFields)
+		if err != nil {
+			return md, errors.Wrapf(err, "verifyFieldsConsistency failed for env overrides")
+		}
 	}
 
-	// Merge the env map into the accum map, and collect contributor info
+	// Merge the env map into the accum map (contributor updating happened above)
 	mergeMaps(accumConfigMap, envMap, nil)
 
+	if resultIsMap {
+		// There's nothing more to do. With a simple map, there's no such thing
+		// as absent fields or required fields or field consistency.
+		// So we'll just return the map we've built up.
+		resultMap := (result).(*map[string]interface{})
+		*resultMap = make(map[string]interface{})
+		mergeMaps(*resultMap, accumConfigMap, nil)
+		md.configMap = resultMap
+		return md, nil
+	}
+
 	// Verify fields one last time on the whole accumulated map, checking absent fields
-	md.absentFields, err = verifyFieldsConsistency(getStructFields(accumConfigMap), md.structFields)
+	md.absentFields, err = decoder.verifyFieldsConsistency(
+		reflection.GetStructFields(accumConfigMap, TagName, codec), md.structFields)
 	if err != nil {
 		// This shouldn't happen, since we've checked all the inputs into accumConfigMap
 		return md, errors.Wrapf(err, "verifyFieldsConsistency failed for merged map")
 	}
 
-	var missingRequiredFields []structField
+	var missingRequiredFields []reflection.StructField
 	for _, f := range md.absentFields {
-		if !f.optional {
+		if !f.Optional {
 			missingRequiredFields = append(missingRequiredFields, f)
 		}
 	}
@@ -236,51 +305,51 @@ func mergeMaps(dst, src map[string]interface{}, keyPrefix Key) (keysMerged []Key
 // field in the config).
 // 2. The field types match.
 // 3. Absent fields (required or optional). Return this, but don't error on it.
-func verifyFieldsConsistency(check, gold []structField) (absentFields []structField, err error) {
+func (d decoder) verifyFieldsConsistency(check, gold []reflection.StructField) (absentFields []reflection.StructField, err error) {
 	// Start by treating all the gold fields as absent, then remove them as we hit them
-	absentFieldsCandidates := make([]structField, len(gold))
+	absentFieldsCandidates := make([]reflection.StructField, len(gold))
 	copy(absentFieldsCandidates, gold)
 
-	var skipPrefixes []aliasedKey
+	var skipPrefixes []reflection.AliasedKey
 
 CheckFieldsLoop:
 	for _, checkField := range check {
 		for _, skipPrefix := range skipPrefixes {
-			if aliasedKeyPrefixMatch(checkField.aliasedKey, skipPrefix) {
+			if aliasedKeyPrefixMatch(checkField.AliasedKey, skipPrefix) {
 				continue CheckFieldsLoop
 			}
 		}
 
-		goldField, ok := findStructField(gold, checkField.aliasedKey)
+		goldField, ok := findStructField(gold, checkField.AliasedKey)
 		if !ok {
 			return nil, errors.Errorf("field in config not found in struct: %+v", checkField)
 		}
 
 		// Remove goldField from absentFieldsCandidates
 		for i := range absentFieldsCandidates {
-			if aliasedKeysMatch(absentFieldsCandidates[i].aliasedKey, goldField.aliasedKey) {
+			if aliasedKeysMatch(absentFieldsCandidates[i].AliasedKey, goldField.AliasedKey) {
 				absentFieldsCandidates = append(absentFieldsCandidates[:i], absentFieldsCandidates[i+1:]...)
 				break
 			}
 		}
 
-		noDeeper, err := fieldTypesConsistent(checkField, goldField)
+		noDeeper, err := d.fieldTypesConsistent(checkField, goldField)
 		if err != nil {
 			return nil, errors.Wrapf(err, "field types not consistent; got %+v, want %+v", checkField, goldField)
 		}
 
 		if noDeeper {
-			skipPrefixes = append(skipPrefixes, checkField.aliasedKey)
+			skipPrefixes = append(skipPrefixes, checkField.AliasedKey)
 		}
 	}
 
 	// Keys skipped due to skipPrefix do not cound as "absent", so remove any matches
 	// from absentFieldsCandidates that didn't get processed above.
-	absentFields = make([]structField, 0)
+	absentFields = make([]reflection.StructField, 0)
 AbsentSkipLoop:
 	for _, absent := range absentFieldsCandidates {
 		for _, skipPrefix := range skipPrefixes {
-			if aliasedKeyPrefixMatch(absent.aliasedKey, skipPrefix) {
+			if aliasedKeyPrefixMatch(absent.AliasedKey, skipPrefix) {
 				continue AbsentSkipLoop
 			}
 		}
@@ -292,7 +361,7 @@ AbsentSkipLoop:
 }
 
 // It is assumed that check is from a map and gold is from a struct.
-func fieldTypesConsistent(check, gold structField) (noDeeper bool, err error) {
+func (d decoder) fieldTypesConsistent(check, gold reflection.StructField) (noDeeper bool, err error) {
 	/*
 		Examples:
 		- time.Time implements encoding.TextUnmarshaler, so expectedType will be "string"
@@ -300,9 +369,9 @@ func fieldTypesConsistent(check, gold structField) (noDeeper bool, err error) {
 
 	*/
 
-	if gold.expectedType != "" {
+	if gold.ExpectedType != "" {
 		// If a type is specified, then it must match exactly
-		if check.typ != gold.expectedType && check.kind != gold.expectedType {
+		if check.Type != gold.ExpectedType && check.Kind != gold.ExpectedType {
 			return false, errors.Errorf("check field type/kind does not match gold expected type; check:%+v; gold:%+v", check, gold)
 		}
 
@@ -314,43 +383,50 @@ func fieldTypesConsistent(check, gold structField) (noDeeper bool, err error) {
 	}
 
 	// Exact match
-	if check.typ == gold.typ || check.typ == gold.kind {
+	if check.Type == gold.Type || check.Type == gold.Kind {
 		return false, nil
 	}
 
 	// E.g., if there's a "*string" in the gold and a "string" in the check, that's fine
-	if gold.typ == "*"+check.typ {
+	if gold.Type == "*"+check.Type {
 		return false, nil
 	}
 
-	if gold.kind == "struct" && check.kind == "map" {
+	if gold.Kind == "struct" && check.Kind == "map" {
 		return false, nil
 	}
 
 	// We'll treat different int sizes as equivalent.
 	// If values are too big for specified types, an error will occur
 	// when unmarshalling.
-	if strings.HasPrefix(gold.kind, "int") && strings.HasPrefix(check.kind, "int") {
+	if strings.HasPrefix(gold.Kind, "int") && strings.HasPrefix(check.Kind, "int") {
 		return false, nil
 	}
 
 	// We'll treat different float sizes as equivalent.
 	// If values are too big for specified types, an error will occur
 	// when unmarshalling.
-	if strings.HasPrefix(gold.kind, "float") && strings.HasPrefix(check.kind, "float") {
+	if strings.HasPrefix(gold.Kind, "float") && strings.HasPrefix(check.Kind, "float") {
 		return false, nil
 	}
 
 	// We don't check types inside a slice.
 	// TODO: Type checking inside slices.
-	if gold.kind == "slice" && check.kind == "slice" {
+	if gold.Kind == "slice" && check.Kind == "slice" {
 		return true, nil
 	}
 
-	return false, errors.Errorf("check field type/kind does not match gold expected type; check:%+v; gold:%+v", check, gold)
+	// See if there are any codec-specific checks to make this okay
+	noDeeper, err = d.codec.FieldTypesConsistent(check, gold)
+	if err == nil {
+		return noDeeper, nil
+	}
+	// err is set, but we'll create our own for consistency
+
+	return false, errors.Errorf("check field type/kind does not match gold type/kind; check:%+v; gold:%+v", check, gold)
 }
 
-func aliasedKeysMatch(ak1, ak2 aliasedKey) bool {
+func aliasedKeysMatch(ak1, ak2 reflection.AliasedKey) bool {
 	if len(ak1) != len(ak2) {
 		return false
 	}
@@ -377,31 +453,34 @@ func aliasedKeysMatch(ak1, ak2 aliasedKey) bool {
 	return true
 }
 
-func aliasedKeyPrefixMatch(ak, prefix aliasedKey) bool {
+func aliasedKeyPrefixMatch(ak, prefix reflection.AliasedKey) bool {
+	if len(prefix) > len(ak) {
+		return false
+	}
 	return aliasedKeysMatch(ak[:len(prefix)], prefix)
 }
 
-func findStructField(fields []structField, targetKey aliasedKey) (structField, bool) {
+func findStructField(fields []reflection.StructField, targetKey reflection.AliasedKey) (reflection.StructField, bool) {
 	for _, field := range fields {
-		if len(field.aliasedKey) != len(targetKey) {
+		if len(field.AliasedKey) != len(targetKey) {
 			// Can't possibly match
 			continue
 		}
 
-		if aliasedKeysMatch(targetKey, field.aliasedKey) {
+		if aliasedKeysMatch(targetKey, field.AliasedKey) {
 			// We found the field
 			return field, true
 		}
 	}
 
 	// We exhausted the search without a match
-	return structField{}, false
+	return reflection.StructField{}, false
 }
 
-func aliasedKeyFromKey(key Key) aliasedKey {
-	result := make(aliasedKey, len(key))
+func aliasedKeyFromKey(key Key) reflection.AliasedKey {
+	result := make(reflection.AliasedKey, len(key))
 	for i := range key {
-		result[i] = aliasedKeyElem{key[i]}
+		result[i] = reflection.AliasedKeyElem{key[i]}
 	}
 	return result
 }

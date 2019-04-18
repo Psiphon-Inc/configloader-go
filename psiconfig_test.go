@@ -10,142 +10,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/BurntSushi/toml"
+	"github.com/Psiphon-Inc/psiphon-go-config/json"
+	"github.com/Psiphon-Inc/psiphon-go-config/reflection"
+	"github.com/Psiphon-Inc/psiphon-go-config/toml"
 )
 
-/*
-func TestMetadata_IsDefined(t *testing.T) {
-	type test struct {
-		name    string
-		toml    string
-		strct   interface{}
-		argKey  []string
-		want    bool
-		wantErr bool
-	}
-	var tests []test
-
-	//------------------------------------
-	tst := test{}
-	tst.name = "simple match: struct path"
-	tst.toml = `
-	a = "aa"
-	`
-	tst.strct = &struct {
-		A string
-	}{}
-	tst.argKey = []string{"A"}
-	tst.want = true
-	tst.wantErr = false
-	tests = append(tests, tst)
-	//------------------------------------
-	tst = test{}
-	tst.name = "simple match: toml path"
-	tst.toml = `
-	a = "aa"
-	`
-	tst.strct = &struct {
-		A string
-	}{}
-	tst.argKey = []string{"a"}
-	tst.want = true
-	tst.wantErr = false
-	tests = append(tests, tst)
-	//------------------------------------
-	tst = test{}
-	tst.name = "simple match: alias struct"
-	tst.toml = `
-	apple = "aa"
-	`
-	tst.strct = &struct {
-		A string `toml:"apple"`
-	}{}
-	tst.argKey = []string{"A"}
-	tst.want = true
-	tst.wantErr = false
-	tests = append(tests, tst)
-	//------------------------------------
-	tst = test{}
-	tst.name = "simple match: alias toml"
-	tst.toml = `
-	apple = "aa"
-	`
-	tst.strct = &struct {
-		A string `toml:"apple"`
-	}{}
-	tst.argKey = []string{"apple"}
-	tst.want = true
-	tst.wantErr = false
-	tests = append(tests, tst)
-	//------------------------------------
-	tst = test{}
-	tst.name = "simple non-match"
-	tst.toml = `
-	x = "aa"
-	`
-	tst.strct = &struct {
-		A string
-	}{}
-	tst.argKey = []string{"A"}
-	tst.want = false
-	tst.wantErr = false
-	tests = append(tests, tst)
-	//------------------------------------
-	tst = test{}
-	tst.name = "complex"
-	tst.toml = `
-	[sect1]
-	a = "a1"
-	[sect2]
-	a = "a2"
-	[sect2.1]
-	a = "a2.1"
-	b = "b2.1"
-	`
-	tst.strct = &struct {
-		Sect1 struct {
-			A string
-		}
-		Sect2 struct {
-			A       string
-			Sect2_1 struct {
-				A string
-				B string
-			} `toml:"1"`
-		}
-	}{}
-	tst.argKey = []string{"Sect2", "Sect2_1", "B"}
-	tst.want = true
-	tst.wantErr = false
-	tests = append(tests, tst)
-	//------------------------------------
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			tomlMD, err := toml.Decode(tt.toml, tt.strct)
-			if err != nil {
-				t.Fatalf("toml.Decode failed: %v", err)
-			}
-
-			md := Metadata{
-				tomlMD:           &tomlMD,
-				configStructKeys: structKeys(tt.strct),
-			}
-
-			got, err := md.IsDefined(tt.argKey...)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("Metadata.IsDefined() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-			if got != tt.want {
-				t.Errorf("Metadata.IsDefined() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-*/
-
-/*
 func Test_setMapByKey(t *testing.T) {
 	type args struct {
 		m map[string]interface{}
@@ -228,151 +97,6 @@ func Test_setMapByKey(t *testing.T) {
 		})
 	}
 }
-*/
-
-/*
-func Test_setMapLeafFromMap(t *testing.T) {
-	type args struct {
-		fromMap map[string]interface{}
-		toMap   map[string]interface{}
-		k       Key
-	}
-	type test struct {
-		name      string
-		args      args
-		want      bool
-		wantToMap map[string]interface{}
-	}
-	tests := make([]test, 0)
-
-	tst := test{}
-	tst.name = "simple"
-	tst.args.fromMap = map[string]interface{}{
-		"a": "aa",
-	}
-	tst.args.toMap = map[string]interface{}{}
-	tst.args.k = Key{"a"}
-	tst.want = true
-	tst.wantToMap = map[string]interface{}{
-		"a": "aa",
-	}
-	tests = append(tests, tst)
-	//--------------------------------------------------------------------
-	tst = test{}
-	tst.name = "overwrite"
-	tst.args.fromMap = map[string]interface{}{
-		"a": "aa",
-		"b": "bb",
-	}
-	tst.args.toMap = map[string]interface{}{
-		"a": "initial-a",
-		"b": "initial-b",
-	}
-	tst.args.k = Key{"a"}
-	tst.want = true
-	tst.wantToMap = map[string]interface{}{
-		"a": "aa",
-		"b": "initial-b",
-	}
-	tests = append(tests, tst)
-	//--------------------------------------------------------------------
-	tst = test{}
-	tst.name = "empty key (invalid call)"
-	tst.args.fromMap = map[string]interface{}{
-		"a": "aa",
-	}
-	tst.args.toMap = map[string]interface{}{
-		"a": "initial",
-	}
-	tst.args.k = Key{}
-	tst.want = false
-	tst.wantToMap = map[string]interface{}{
-		"a": "initial",
-	}
-	tests = append(tests, tst)
-	//--------------------------------------------------------------------
-	tst = test{}
-	tst.name = "key is non-leaf"
-	tst.args.fromMap = map[string]interface{}{
-		"a": map[string]interface{}{
-			"b": map[string]interface{}{
-				"c": map[string]interface{}{
-					"d": "dd",
-				},
-			},
-		},
-	}
-	tst.args.toMap = map[string]interface{}{}
-	tst.args.k = Key{"a", "b"}
-	tst.want = false
-	tst.wantToMap = map[string]interface{}{}
-	tests = append(tests, tst)
-	//--------------------------------------------------------------------
-	tst = test{}
-	tst.name = "key too long"
-	tst.args.fromMap = map[string]interface{}{
-		"a": "aa",
-	}
-	tst.args.toMap = map[string]interface{}{}
-	tst.args.k = Key{"a", "b"}
-	tst.want = false
-	tst.wantToMap = map[string]interface{}{}
-	tests = append(tests, tst)
-	//--------------------------------------------------------------------
-	tst = test{}
-	tst.name = "nil subtree"
-	tst.args.fromMap = map[string]interface{}{
-		"a": map[string]interface{}{
-			"b": map[string]interface{}{
-				"c": map[string]interface{}{
-					"d": "dd",
-				},
-			},
-		},
-	}
-	tst.args.toMap = map[string]interface{}{
-		"a": nil,
-	}
-	tst.args.k = Key{"a", "b", "c", "d"}
-	tst.want = true
-	tst.wantToMap = tst.args.fromMap
-	tests = append(tests, tst)
-	//--------------------------------------------------------------------
-	tst = test{}
-	tst.name = "nil subtree with rollback"
-	tst.args.fromMap = map[string]interface{}{
-		"a": map[string]interface{}{
-			"b": map[string]interface{}{
-				"c": map[string]interface{}{
-					"d": "dd",
-				},
-			},
-		},
-	}
-	tst.args.toMap = map[string]interface{}{
-		"a": nil,
-	}
-	tst.args.k = Key{"a", "b", "c"}
-	tst.want = false
-	tst.wantToMap = map[string]interface{}{
-		"a": nil,
-	}
-	tests = append(tests, tst)
-	//--------------------------------------------------------------------
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := setMapLeafFromMap(tt.args.fromMap, tt.args.toMap, tt.args.k); got != tt.want {
-				t.Errorf("setMapLeafFromMap() = %v, want %v", got, tt.want)
-			}
-
-			if !reflect.DeepEqual(tt.args.toMap, tt.wantToMap) {
-				t.Fatalf("toMap not equal to wantToMap; toMap=%#v; wantToMap=%#v", tt.args.toMap, tt.wantToMap)
-			}
-		})
-	}
-}
-*/
 
 type textUnmarshalType struct {
 	ExportedString string
@@ -386,20 +110,7 @@ func (tut *textUnmarshalType) UnmarshalText(text []byte) error {
 
 var _ encoding.TextUnmarshaler = &textUnmarshalType{}
 
-func TestLoad_TOML(t *testing.T) {
-	codec := Codec{
-		Marshal: func(v interface{}) ([]byte, error) {
-			sb := &strings.Builder{}
-			enc := toml.NewEncoder(sb)
-			err := enc.Encode(v)
-			if err != nil {
-				return nil, err
-			}
-			return []byte(sb.String()), nil
-		},
-		Unmarshal: toml.Unmarshal,
-	}
-
+func TestLoad(t *testing.T) {
 	type stringAlias string
 	type boolAlias bool
 
@@ -408,20 +119,20 @@ func TestLoad_TOML(t *testing.T) {
 		B1 int
 	}
 	type subStruct struct {
-		A  string       `psiconfig:"optional"`
-		S1 simpleStruct `toml:"sect1" psiconfig:"optional"`
-		S2 simpleStruct `toml:"sect2" psiconfig:"optional"`
+		A  string       `conf:"optional"`
+		S1 simpleStruct `toml:"sect1" json:"sect1" conf:"optional"`
+		S2 simpleStruct `toml:"sect2" json:"sect2" conf:"optional"`
 	}
 	type tagStruct struct {
-		A stringAlias `toml:"eh,omitempty" psiconfig:"optional,string"`
-		B boolAlias   `json:"bee" toml:"bee" psiconfig:","`
-		C string      `toml:"-"`
-		D float32     `psiconfig:"optional"`
+		A stringAlias `toml:"eh,omitempty" json:"eh,omitempty" conf:"optional,string"`
+		B boolAlias   `toml:"bee" json:"bee" conf:","`
+		C string      `toml:"-" json:"-"`
+		D float32     `conf:"optional"`
 	}
 	type advancedTypesStruct struct {
 		A *string
 		B []int
-		C simpleStruct `toml:"cee_three"`
+		C simpleStruct `toml:"cee_three" json:"cee_three"`
 		D []simpleStruct
 		E time.Time
 		F textUnmarshalType
@@ -432,10 +143,11 @@ func TestLoad_TOML(t *testing.T) {
 		Adv    advancedTypesStruct
 	}
 	type hardTypeStruct struct {
-		F float64 `psiconfig:",float32"` // BurntSushi/toml will never give us float32, so this should never match
+		F float64 `conf:",float32"` // BurntSushi/toml will never give us float32, so this should never match
 	}
 
 	type args struct {
+		codec        Codec
 		readers      []io.Reader
 		readerNames  []string
 		envOverrides []EnvOverride
@@ -456,7 +168,8 @@ func TestLoad_TOML(t *testing.T) {
 
 	//----------------------------------------------------------------------
 	tst = test{}
-	tst.name = "simple"
+	tst.name = "simple toml"
+	tst.args.codec = toml.Codec
 	tst.args.readers = makeStringReaders([]string{
 		`
 		B1 = 123
@@ -489,7 +202,71 @@ func TestLoad_TOML(t *testing.T) {
 
 	//----------------------------------------------------------------------
 	tst = test{}
+	tst.name = "simple json"
+	tst.args.codec = json.Codec
+	tst.args.readers = makeStringReaders([]string{
+		`{"B1": 123, "a1": "aa"}`,
+	})
+	tst.args.readerNames = nil
+	tst.args.envOverrides = nil
+	tst.wantConfig = simpleStruct{
+		A1: "aa",
+		B1: 123,
+	}
+	tst.wantErr = false
+	tst.wantContributions = Contributions{
+		"a1": "0",
+		"B1": "0",
+	}
+	tst.wantIsDefineds = []Key{
+		{"a1"},
+		{"A1"},
+		{"b1"},
+		{"B1"},
+	}
+	tst.wantNotIsDefineds = []Key{}
+	tst.wantErrIsDefineds = []Key{
+		{"x"},
+		{"X"},
+	}
+	tests = append(tests, tst)
+
+	//----------------------------------------------------------------------
+	tst = test{}
+	tst.name = "simple map"
+	tst.args.codec = toml.Codec
+	tst.args.readers = makeStringReaders([]string{
+		`
+		B1 = 123
+		a1 = "aa"
+		`,
+	})
+	tst.args.readerNames = nil
+	tst.args.envOverrides = nil
+	tst.wantConfig = map[string]interface{}{
+		"a1": "aa",
+		"B1": int64(123),
+	}
+	tst.wantErr = false
+	tst.wantContributions = Contributions{
+		"a1": "0",
+		"B1": "0",
+	}
+	tst.wantIsDefineds = []Key{
+		{"a1"},
+		{"B1"},
+	}
+	tst.wantNotIsDefineds = []Key{
+		{"x"},
+		{"X"},
+	}
+	tst.wantErrIsDefineds = []Key{}
+	tests = append(tests, tst)
+
+	//----------------------------------------------------------------------
+	tst = test{}
 	tst.name = "multi-reader"
+	tst.args.codec = toml.Codec
 	tst.args.readers = makeStringReaders([]string{
 		`
 		[sect1]
@@ -547,7 +324,73 @@ func TestLoad_TOML(t *testing.T) {
 
 	//----------------------------------------------------------------------
 	tst = test{}
+	tst.name = "multi-reader json"
+	tst.args.codec = json.Codec
+	tst.args.readers = makeStringReaders([]string{
+		`{
+			"sect1": {
+				"a1": "sect1.a1 from first reader"
+			},
+			"sect2": {
+				"a1": "sect2.a1 from first reader"
+			}
+		}`,
+		`{
+			"sect1": {
+				"b1": 21
+			},
+			"sect2": {
+				"b1": 22
+			}
+		}`,
+		`{
+			"sect1": {
+				"a1": "sect1.a1 from third reader"
+			},
+			"sect2": {
+				"b1": 32
+			}
+		}`,
+	})
+	tst.args.readerNames = []string{"first", "second", "third"}
+	tst.args.envOverrides = nil
+	tst.wantConfig = subStruct{
+		S1: simpleStruct{
+			A1: "sect1.a1 from third reader",
+			B1: 21,
+		},
+		S2: simpleStruct{
+			A1: "sect2.a1 from first reader",
+			B1: 32,
+		},
+	}
+	tst.wantErr = false
+	tst.wantContributions = Contributions{
+		"sect1.a1": "third",
+		"sect1.b1": "second",
+		"sect2.a1": "first",
+		"sect2.b1": "third",
+	}
+	tst.wantIsDefineds = []Key{
+		{"sect1"}, {"Sect1"},
+		{"sect2"}, {"Sect2"},
+		{"sect1", "a1"}, {"Sect1", "A1"},
+		{"Sect1", "a1"}, {"sect1", "A1"},
+		{"sect1", "b1"}, {"Sect1", "B1"},
+		{"Sect1", "b1"}, {"sect1", "B1"},
+		{"sect2", "a1"}, {"Sect2", "A1"},
+		{"Sect2", "a1"}, {"sect2", "A1"},
+		{"sect2", "b1"}, {"Sect2", "B1"},
+		{"Sect2", "b1"}, {"sect1", "B1"},
+	}
+	tst.wantNotIsDefineds = []Key{{"A"}}
+	tst.wantErrIsDefineds = nil
+	tests = append(tests, tst)
+
+	//----------------------------------------------------------------------
+	tst = test{}
 	tst.name = "env override"
+	tst.args.codec = toml.Codec
 	tst.args.readers = makeStringReaders([]string{
 		`
 		[sect1]
@@ -608,6 +451,7 @@ func TestLoad_TOML(t *testing.T) {
 	//----------------------------------------------------------------------
 	tst = test{}
 	tst.name = "error: vestigial key"
+	tst.args.codec = toml.Codec
 	tst.args.readers = makeStringReaders([]string{
 		`
 		a1 = "aa"
@@ -622,7 +466,20 @@ func TestLoad_TOML(t *testing.T) {
 
 	//----------------------------------------------------------------------
 	tst = test{}
+	tst.name = "error: vestigial key json"
+	tst.args.codec = json.Codec
+	tst.args.readers = makeStringReaders([]string{
+		`{ "a1": "aa", "b1": 22, "c1": "nope" }`,
+	})
+	tst.wantConfig = simpleStruct{}
+	tst.args.readerNames = []string{"first"}
+	tst.wantErr = true
+	tests = append(tests, tst)
+
+	//----------------------------------------------------------------------
+	tst = test{}
 	tst.name = "error: missing required key"
+	tst.args.codec = toml.Codec
 	tst.args.readers = makeStringReaders([]string{
 		`
 		a1 = "aa"
@@ -635,7 +492,20 @@ func TestLoad_TOML(t *testing.T) {
 
 	//----------------------------------------------------------------------
 	tst = test{}
+	tst.name = "error: missing required key json"
+	tst.args.codec = json.Codec
+	tst.args.readers = makeStringReaders([]string{
+		`{ "a1": "aa" }`,
+	})
+	tst.wantConfig = simpleStruct{}
+	tst.args.readerNames = []string{"first"}
+	tst.wantErr = true
+	tests = append(tests, tst)
+
+	//----------------------------------------------------------------------
+	tst = test{}
 	tst.name = "tags"
+	tst.args.codec = toml.Codec
 	tst.args.readers = makeStringReaders([]string{
 		`
 		bee = true
@@ -666,7 +536,40 @@ func TestLoad_TOML(t *testing.T) {
 
 	//----------------------------------------------------------------------
 	tst = test{}
+	tst.name = "tags json"
+	tst.args.codec = json.Codec
+	tst.args.readers = makeStringReaders([]string{
+		`{
+			"bee": true,
+			"D": 1.2
+		}`,
+	})
+	tst.args.readerNames = nil
+	tst.args.envOverrides = nil
+	tst.wantConfig = tagStruct{
+		B: true,
+		D: 1.2,
+	}
+	tst.wantErr = false
+	tst.wantContributions = Contributions{
+		"bee": "0",
+		"D":   "0",
+	}
+	tst.wantIsDefineds = []Key{
+		{"bee"}, {"b"}, {"B"},
+	}
+	tst.wantNotIsDefineds = []Key{
+		{"A"}, {"a"},
+	}
+	tst.wantErrIsDefineds = []Key{
+		{"c"}, {"C"},
+	}
+	tests = append(tests, tst)
+
+	//----------------------------------------------------------------------
+	tst = test{}
 	tst.name = "advanced types"
+	tst.args.codec = toml.Codec
 	tst.args.readers = makeStringReaders([]string{
 		`
 		A = "aaaa"
@@ -730,6 +633,137 @@ func TestLoad_TOML(t *testing.T) {
 
 	//----------------------------------------------------------------------
 	tst = test{}
+	tst.name = "advanced types json"
+	tst.args.codec = json.Codec
+	tst.args.readers = makeStringReaders([]string{
+		`{
+		"A": "aaaa",
+		"B": [1, 1, 2, 3, 5],
+		"E": "2001-01-01T01:01:01Z",
+		"F": "my text",
+		"cee_three": {
+			"a1": "a1a1",
+			"b1": 321
+		},
+		"D": [
+			{
+				"a1": "1",
+				"b1": 1
+			},
+			{
+				"a1": "2",
+				"b1": 2
+			},
+			{
+				"a1": "3",
+				"b1": 3
+			}
+		]
+		}`,
+	})
+	tst.args.readerNames = nil
+	tst.args.envOverrides = nil
+	aString = "aaaa"
+	eTime, _ = time.Parse(time.RFC3339, "2001-01-01T01:01:01Z")
+	tst.wantConfig = advancedTypesStruct{
+		A: &aString,
+		B: []int{1, 1, 2, 3, 5},
+		C: simpleStruct{
+			A1: "a1a1",
+			B1: 321,
+		},
+		D: []simpleStruct{
+			{A1: "1", B1: 1},
+			{A1: "2", B1: 2},
+			{A1: "3", B1: 3},
+		},
+		E: eTime,
+		F: textUnmarshalType{
+			ExportedString: "my text",
+		},
+	}
+	tst.wantErr = false
+	tst.wantContributions = Contributions{
+		"A":            "0",
+		"B":            "0",
+		"D":            "0",
+		"E":            "0",
+		"F":            "0",
+		"cee_three.a1": "0",
+		"cee_three.b1": "0",
+	}
+	tst.wantIsDefineds = []Key{
+		{"C", "A1"},
+		{"c", "a1"},
+		{"cee_three", "a1"},
+		{"F", "ExportedString"}, // Not explicity defined, but implicitly by F's text-unmarshalling
+	}
+	tst.wantNotIsDefineds = []Key{}
+	tst.wantErrIsDefineds = []Key{}
+	tests = append(tests, tst)
+
+	//----------------------------------------------------------------------
+	tst = test{}
+	tst.name = "advanced types map"
+	tst.args.codec = toml.Codec
+	tst.args.readers = makeStringReaders([]string{
+		`
+		A = "aaaa"
+		B = [1, 1, 2, 3, 5]
+		E = "2001-01-01T01:01:01Z"
+		F = "my text"
+		[cee_three]
+		a1 = "a1a1"
+		b1 = 321
+		[[D]]
+		a1 = "1"
+		b1 = 1
+		[[D]]
+		a1 = "2"
+		b1 = 2
+		[[D]]
+		a1 = "3"
+		b1 = 3
+		`,
+	})
+	tst.args.readerNames = nil
+	tst.args.envOverrides = nil
+	aString = "aaaa"
+	tst.wantConfig = map[string]interface{}{
+		"A": "aaaa",
+		"B": []interface{}{int64(1), int64(1), int64(2), int64(3), int64(5)},
+		"cee_three": map[string]interface{}{
+			"a1": "a1a1",
+			"b1": int64(321),
+		},
+		"D": []map[string]interface{}{
+			{"a1": "1", "b1": int64(1)},
+			{"a1": "2", "b1": int64(2)},
+			{"a1": "3", "b1": int64(3)},
+		},
+		"E": "2001-01-01T01:01:01Z",
+		"F": "my text",
+	}
+	tst.wantErr = false
+	tst.wantContributions = Contributions{
+		"A":            "0",
+		"B":            "0",
+		"D":            "0",
+		"E":            "0",
+		"F":            "0",
+		"cee_three.a1": "0",
+		"cee_three.b1": "0",
+	}
+	tst.wantIsDefineds = []Key{
+		{"cee_three", "a1"},
+		{"D"},
+	}
+	tst.wantNotIsDefineds = []Key{}
+	tst.wantErrIsDefineds = []Key{}
+	tests = append(tests, tst)
+
+	//----------------------------------------------------------------------
+	tst = test{}
 	// BurntSushi/toml will fill the struct with zero values and give no error
 	type structWithString struct {
 		F string
@@ -738,6 +772,22 @@ func TestLoad_TOML(t *testing.T) {
 		Struct structWithString
 	}
 	tst.name = "wrong type for struct"
+	tst.args.codec = toml.Codec
+	tst.args.readers = makeStringReaders([]string{
+		`
+		Struct = "string is the wrong type"
+		`,
+	})
+	tst.args.readerNames = nil
+	tst.args.envOverrides = nil
+	tst.wantConfig = structWithSub{}
+	tst.wantErr = true
+	tests = append(tests, tst)
+
+	//----------------------------------------------------------------------
+	tst = test{}
+	tst.name = "wrong type for struct json"
+	tst.args.codec = json.Codec
 	tst.args.readers = makeStringReaders([]string{
 		`
 		Struct = "string is the wrong type"
@@ -752,6 +802,7 @@ func TestLoad_TOML(t *testing.T) {
 	//----------------------------------------------------------------------
 	tst = test{}
 	tst.name = "error: multi-reader name mismatch"
+	tst.args.codec = toml.Codec
 	tst.args.readers = makeStringReaders([]string{
 		`
 		[sect1]
@@ -781,6 +832,7 @@ func TestLoad_TOML(t *testing.T) {
 	//----------------------------------------------------------------------
 	tst = test{}
 	tst.name = "error: bad toml"
+	tst.args.codec = toml.Codec
 	tst.args.readers = makeStringReaders([]string{
 		`
 		not really TOML
@@ -793,7 +845,22 @@ func TestLoad_TOML(t *testing.T) {
 
 	//----------------------------------------------------------------------
 	tst = test{}
+	tst.name = "error: bad json"
+	tst.args.codec = json.Codec
+	tst.args.readers = makeStringReaders([]string{
+		`
+		not really JSON
+		`,
+	})
+	tst.args.readerNames = []string{"first"}
+	tst.wantConfig = subStruct{}
+	tst.wantErr = true
+	tests = append(tests, tst)
+
+	//----------------------------------------------------------------------
+	tst = test{}
 	tst.name = "error: env override with unfindable key"
+	tst.args.codec = toml.Codec
 	tst.args.readers = makeStringReaders([]string{
 		`
 		[sect1]
@@ -831,6 +898,7 @@ func TestLoad_TOML(t *testing.T) {
 	//----------------------------------------------------------------------
 	tst = test{}
 	tst.name = "error: env override with empty key"
+	tst.args.codec = toml.Codec
 	tst.args.readers = makeStringReaders([]string{
 		`
 		[sect1]
@@ -868,10 +936,22 @@ func TestLoad_TOML(t *testing.T) {
 	//----------------------------------------------------------------------
 	tst = test{}
 	tst.name = "error: explicit type fail"
+	tst.args.codec = toml.Codec
 	tst.args.readers = makeStringReaders([]string{
 		`
 		F = 1.2
 		`,
+	})
+	tst.wantConfig = hardTypeStruct{}
+	tst.wantErr = true
+	tests = append(tests, tst)
+
+	//----------------------------------------------------------------------
+	tst = test{}
+	tst.name = "error: explicit type fail json"
+	tst.args.codec = json.Codec
+	tst.args.readers = makeStringReaders([]string{
+		`{ "F": 1.2 }`,
 	})
 	tst.wantConfig = hardTypeStruct{}
 	tst.wantErr = true
@@ -889,7 +969,7 @@ func TestLoad_TOML(t *testing.T) {
 			// Create an instance of the result based on the type of wantConfig
 			resultPtr := reflect.New(reflect.TypeOf(tt.wantConfig)).Interface()
 
-			gotMD, err := Load(codec, tt.args.readers, tt.args.readerNames, tt.args.envOverrides, resultPtr)
+			gotMD, err := Load(tt.args.codec, tt.args.readers, tt.args.readerNames, tt.args.envOverrides, resultPtr)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("Load() error = %v; wantErr: %v", err, tt.wantErr)
 			}
@@ -900,6 +980,24 @@ func TestLoad_TOML(t *testing.T) {
 
 			resultComparator := reflect.ValueOf(resultPtr).Elem().Interface()
 			if !reflect.DeepEqual(resultComparator, tt.wantConfig) {
+				/*
+					// Code for debugging map mismatches
+					r := resultComparator.(map[string]interface{})
+					w := tt.wantConfig.(map[string]interface{})
+					if len(r) != len(w) {
+						t.Fatalf("length bad")
+					}
+					for k := range r {
+						if reflect.TypeOf(r[k]) != reflect.TypeOf(w[k]) {
+							t.Fatalf("types bad for %v: %v vs %v", k, reflect.TypeOf(r[k]), reflect.TypeOf(w[k]))
+						}
+					}
+
+					rstruct := reflection.GetStructFields(r, TagName, tt.args.codec)
+					wstruct := reflection.GetStructFields(w, TagName, tt.args.codec)
+					t.Fatalf("structfields\ngot  %+v\nwant %+v", rstruct, wstruct)
+				*/
+
 				t.Fatalf("result did not match;\ngot  %#v\nwant %#v\nmd: %+v", resultComparator, tt.wantConfig, gotMD)
 			}
 
@@ -910,7 +1008,7 @@ func TestLoad_TOML(t *testing.T) {
 			for _, k := range tt.wantIsDefineds {
 				def, err := gotMD.IsDefined(k...)
 				if err != nil {
-					t.Fatalf("IsDefined should not get error; key: %#v; metadata: %#v", k, gotMD)
+					t.Fatalf("IsDefined should not get error: %v; key: %#v; metadata: %#v", err, k, gotMD)
 				}
 				if !def {
 					t.Fatalf("key should be defined: %#v; metadata: %#v", k, gotMD)
@@ -939,8 +1037,8 @@ func TestLoad_TOML(t *testing.T) {
 
 func Test_aliasedKeysMatch(t *testing.T) {
 	type args struct {
-		ak1 aliasedKey
-		ak2 aliasedKey
+		ak1 reflection.AliasedKey
+		ak2 reflection.AliasedKey
 	}
 	tests := []struct {
 		name string
@@ -950,10 +1048,10 @@ func Test_aliasedKeysMatch(t *testing.T) {
 		{
 			name: "simple",
 			args: args{
-				ak1: aliasedKey{
+				ak1: reflection.AliasedKey{
 					{"a"},
 				},
-				ak2: aliasedKey{
+				ak2: reflection.AliasedKey{
 					{"a"},
 				},
 			},
@@ -962,10 +1060,10 @@ func Test_aliasedKeysMatch(t *testing.T) {
 		{
 			name: "case insensitive",
 			args: args{
-				ak1: aliasedKey{
+				ak1: reflection.AliasedKey{
 					{"a"},
 				},
-				ak2: aliasedKey{
+				ak2: reflection.AliasedKey{
 					{"A"},
 				},
 			},
@@ -974,10 +1072,10 @@ func Test_aliasedKeysMatch(t *testing.T) {
 		{
 			name: "aliases",
 			args: args{
-				ak1: aliasedKey{
+				ak1: reflection.AliasedKey{
 					{"a", "apple"},
 				},
-				ak2: aliasedKey{
+				ak2: reflection.AliasedKey{
 					{"apple"},
 				},
 			},
@@ -986,12 +1084,12 @@ func Test_aliasedKeysMatch(t *testing.T) {
 		{
 			name: "complex",
 			args: args{
-				ak1: aliasedKey{
+				ak1: reflection.AliasedKey{
 					{"a", "apple"},
 					{"b", "bee"},
 					{"C", "carrot"},
 				},
-				ak2: aliasedKey{
+				ak2: reflection.AliasedKey{
 					{"apple"},
 					{"B"},
 					{"carrot", "chocolate"},
@@ -1002,12 +1100,12 @@ func Test_aliasedKeysMatch(t *testing.T) {
 		{
 			name: "no match",
 			args: args{
-				ak1: aliasedKey{
+				ak1: reflection.AliasedKey{
 					{"a", "apple"},
 					{"b", "bee"},
 					{"C", "carrot"},
 				},
-				ak2: aliasedKey{
+				ak2: reflection.AliasedKey{
 					{"apple"},
 					{"B"},
 					{"nomatch"},
@@ -1027,8 +1125,8 @@ func Test_aliasedKeysMatch(t *testing.T) {
 
 func Test_findStructField(t *testing.T) {
 	type args struct {
-		fields    []structField
-		targetKey aliasedKey
+		fields    []reflection.StructField
+		targetKey reflection.AliasedKey
 	}
 	tests := []struct {
 		name      string
@@ -1038,12 +1136,12 @@ func Test_findStructField(t *testing.T) {
 		{
 			name: "simple",
 			args: args{
-				targetKey: aliasedKey{
+				targetKey: reflection.AliasedKey{
 					{"a"},
 				},
-				fields: []structField{
+				fields: []reflection.StructField{
 					{
-						aliasedKey: aliasedKey{
+						AliasedKey: reflection.AliasedKey{
 							{"a"},
 						},
 					},
@@ -1054,29 +1152,29 @@ func Test_findStructField(t *testing.T) {
 		{
 			name: "aliases",
 			args: args{
-				targetKey: aliasedKey{
+				targetKey: reflection.AliasedKey{
 					{"b"},
 					{"bee_two"},
 				},
-				fields: []structField{
+				fields: []reflection.StructField{
 					{
-						aliasedKey: aliasedKey{
+						AliasedKey: reflection.AliasedKey{
 							{"a"},
 						},
 					},
 					{
-						aliasedKey: aliasedKey{
+						AliasedKey: reflection.AliasedKey{
 							{"b", "bee"},
 						},
 					},
 					{
-						aliasedKey: aliasedKey{
+						AliasedKey: reflection.AliasedKey{
 							{"b", "bee"},
 							{"b2", "bee_two"},
 						},
 					},
 					{
-						aliasedKey: aliasedKey{
+						AliasedKey: reflection.AliasedKey{
 							{"c", "cee"},
 							{"c2", "cee_two"},
 						},
@@ -1088,29 +1186,29 @@ func Test_findStructField(t *testing.T) {
 		{
 			name: "no match",
 			args: args{
-				targetKey: aliasedKey{
+				targetKey: reflection.AliasedKey{
 					{"b"},
 					{"nomatch"},
 				},
-				fields: []structField{
+				fields: []reflection.StructField{
 					{
-						aliasedKey: aliasedKey{
+						AliasedKey: reflection.AliasedKey{
 							{"a"},
 						},
 					},
 					{
-						aliasedKey: aliasedKey{
+						AliasedKey: reflection.AliasedKey{
 							{"b", "bee"},
 						},
 					},
 					{
-						aliasedKey: aliasedKey{
+						AliasedKey: reflection.AliasedKey{
 							{"b", "bee"},
 							{"b2", "bee_two"},
 						},
 					},
 					{
-						aliasedKey: aliasedKey{
+						AliasedKey: reflection.AliasedKey{
 							{"c", "cee"},
 							{"c2", "cee_two"},
 						},
@@ -1131,34 +1229,21 @@ func Test_findStructField(t *testing.T) {
 				return
 			}
 
-			if !aliasedKeysMatch(gotStructField.aliasedKey, tt.args.targetKey) {
-				t.Fatalf("gotStructField doesn't actually match target: got %+v; want %+v", gotStructField.aliasedKey, tt.args.targetKey)
+			if !aliasedKeysMatch(gotStructField.AliasedKey, tt.args.targetKey) {
+				t.Fatalf("gotStructField doesn't actually match target: got %+v; want %+v", gotStructField.AliasedKey, tt.args.targetKey)
 			}
 		})
 	}
 }
 
 func TestLoad_BadArgs(t *testing.T) {
-	codec := Codec{
-		Marshal: func(v interface{}) ([]byte, error) {
-			sb := &strings.Builder{}
-			enc := toml.NewEncoder(sb)
-			err := enc.Encode(v)
-			if err != nil {
-				return nil, err
-			}
-			return []byte(sb.String()), nil
-		},
-		Unmarshal: toml.Unmarshal,
-	}
-
 	type Struct struct {
 		A string
 	}
 
 	var notPtr Struct
 
-	_, gotErr := Load(codec, makeStringReaders([]string{"\na=1\n"}), nil, nil, notPtr)
+	_, gotErr := Load(toml.Codec, makeStringReaders([]string{"\na=1\n"}), nil, nil, notPtr)
 
 	// Didn't pass in &notPtr, so should get error
 	if gotErr == nil {
@@ -1167,7 +1252,7 @@ func TestLoad_BadArgs(t *testing.T) {
 
 	var nilPtr *Struct
 
-	_, gotErr = Load(codec, makeStringReaders([]string{"\na=1\n"}), nil, nil, nilPtr)
+	_, gotErr = Load(toml.Codec, makeStringReaders([]string{"\na=1\n"}), nil, nil, nilPtr)
 
 	// Passing in nil, so should get error
 	if gotErr == nil {
