@@ -631,13 +631,3 @@ func keyFromAliasedKey(ak reflection.AliasedKey) Key {
 	}
 	return result
 }
-
-/*
-func FilesToUse(filenames, searchPaths []string) []string {
-	multoml supports taking a bunch of filenames to use -- ["config.toml", "config_override.toml"] --
-	and search paths in which to look for them, in order of preference -- [".", "/etc/whatever"] -- and
-	indicates which absolute filepaths should be used for config loading.
-	This should be replicated in this standalone function which can be used before the loading starts.
-	See https://github.com/Psiphon-Inc/multoml/blob/master/multoml.go#L139
-}
-*/
