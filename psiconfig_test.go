@@ -1154,6 +1154,45 @@ func TestLoad(t *testing.T) {
 
 	//----------------------------------------------------------------------
 
+	tst = test{}
+	tst.name = "error: bad defaults key"
+	tst.args.codec = toml.Codec
+	tst.args.readers = makeStringReaders([]string{
+		// Not B is absent even though not tagged optional
+		`
+		D = 1.2
+		`,
+	})
+	tst.args.readerNames = nil
+	tst.args.envOverrides = nil
+	tst.args.defaults = []Default{
+		{
+			Key: Key{"A"}, // struct key, not alias
+			Val: "default A",
+		},
+		{
+			Key: Key{"bee"}, // alias
+			Val: true,
+		},
+		{
+			Key: Key{"D"},
+			Val: float32(2.3),
+		},
+		{
+			Key: Key{"Nope"},
+			Val: "not in struct",
+		},
+	}
+	tst.wantConfig = tagStruct{
+		A: "default A",
+		B: true,
+		D: 1.2,
+	}
+	tst.wantErr = true
+	tests = append(tests, tst)
+
+	//----------------------------------------------------------------------
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			os.Clearenv()
@@ -1455,35 +1494,69 @@ func TestLoad_BadArgs(t *testing.T) {
 }
 
 func TestLoad_Special(t *testing.T) {
-	// Pass in a non-empty map
-	result := map[string]interface{}{
-		"a": map[string]interface{}{
-			"b": "initial",
-			"c": "initial",
-		},
-	}
-	readers := makeStringReaders([]string{
-		`
+	//
+	// Test: Pass in a non-empty map
+	//
+	{
+		result := map[string]interface{}{
+			"a": map[string]interface{}{
+				"b": "initial",
+				"c": "initial",
+			},
+		}
+		readers := makeStringReaders([]string{
+			`
 		[a]
 		b = "from config"
 		d = "from config"
 		`,
-	})
-	_, err := Load(toml.Codec, readers, nil, nil, nil, &result)
-	if err != nil {
-		t.Fatalf("Got error for non-empty map: %v", err)
-	}
-	want := map[string]interface{}{
-		"a": map[string]interface{}{
-			"b": "from config",
-			"c": "initial",
-			"d": "from config",
-		},
-	}
-	if !reflect.DeepEqual(result, want) {
-		t.Fatalf("Non-empty map result didn't match want;\ngot:  %#v\nwant: %#v", result, want)
+		})
+		_, err := Load(toml.Codec, readers, nil, nil, nil, &result)
+		if err != nil {
+			t.Fatalf("Got error for non-empty map: %v", err)
+		}
+		want := map[string]interface{}{
+			"a": map[string]interface{}{
+				"b": "from config",
+				"c": "initial",
+				"d": "from config",
+			},
+		}
+		if !reflect.DeepEqual(result, want) {
+			t.Fatalf("Non-empty map result didn't match want;\ngot:  %#v\nwant: %#v", result, want)
+		}
 	}
 
+	//
+	// Test: Pass in a non-zero struct
+	//
+	{
+		type strct struct {
+			A string `conf:"optional"` // will be pre-filled
+			B string
+		}
+
+		result := strct{
+			A: "pre-filled",
+			B: "pre-filled",
+		}
+		readers := makeStringReaders([]string{
+			`
+			b = "from config"
+			`,
+		})
+		_, err := Load(toml.Codec, readers, nil, nil, nil, &result)
+		if err != nil {
+			t.Fatalf("Got error for non-zero struct: %v", err)
+		}
+		want := strct{
+			A: "pre-filled",
+			B: "from config",
+		}
+		if !reflect.DeepEqual(result, want) {
+			t.Fatalf("Non-zero struct result didn't match want;\ngot:  %#v\nwant: %#v", result, want)
+		}
+	}
 }
 
 func makeStringReaders(ss []string) []io.Reader {
