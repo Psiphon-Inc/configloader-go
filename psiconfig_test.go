@@ -163,13 +163,14 @@ func TestLoad(t *testing.T) {
 		readers      []io.Reader
 		readerNames  []string
 		envOverrides []EnvOverride
+		defaults     []Default
 	}
 	type test struct {
 		name              string
 		args              args
 		env               map[string]string
 		wantConfig        interface{}
-		wantContributions Contributions
+		wantProvenance    Provenance
 		wantIsDefineds    []Key
 		wantNotIsDefineds []Key
 		wantErrIsDefineds []Key
@@ -195,7 +196,7 @@ func TestLoad(t *testing.T) {
 		B1: 123,
 	}
 	tst.wantErr = false
-	tst.wantContributions = Contributions{
+	tst.wantProvenance = Provenance{
 		"a1": "0",
 		"B1": "0",
 	}
@@ -226,7 +227,7 @@ func TestLoad(t *testing.T) {
 		B1: 123,
 	}
 	tst.wantErr = false
-	tst.wantContributions = Contributions{
+	tst.wantProvenance = Provenance{
 		"a1": "0",
 		"B1": "0",
 	}
@@ -260,7 +261,7 @@ func TestLoad(t *testing.T) {
 		"B1": int64(123),
 	}
 	tst.wantErr = false
-	tst.wantContributions = Contributions{
+	tst.wantProvenance = Provenance{
 		"a1": "0",
 		"B1": "0",
 	}
@@ -312,7 +313,7 @@ func TestLoad(t *testing.T) {
 		},
 	}
 	tst.wantErr = false
-	tst.wantContributions = Contributions{
+	tst.wantProvenance = Provenance{
 		"sect1.a1": "third",
 		"sect1.b1": "second",
 		"sect2.a1": "first",
@@ -377,7 +378,7 @@ func TestLoad(t *testing.T) {
 		},
 	}
 	tst.wantErr = false
-	tst.wantContributions = Contributions{
+	tst.wantProvenance = Provenance{
 		"sect1.a1": "third",
 		"sect1.b1": "second",
 		"sect2.a1": "first",
@@ -449,7 +450,7 @@ func TestLoad(t *testing.T) {
 		},
 	}
 	tst.wantErr = false
-	tst.wantContributions = Contributions{
+	tst.wantProvenance = Provenance{
 		"sect1.a1": "first",
 		"sect1.b1": "$S1B1_FROM_ENV",
 		"sect2.a1": "$S2A1_FROM_ENV",
@@ -510,7 +511,7 @@ func TestLoad(t *testing.T) {
 		},
 	}
 	tst.wantErr = false
-	tst.wantContributions = Contributions{
+	tst.wantProvenance = Provenance{
 		"sect1.a1": "first",
 		"sect1.b1": "$S1B1_FROM_ENV",
 		"sect2.a1": "$S2A1_FROM_ENV",
@@ -593,7 +594,7 @@ func TestLoad(t *testing.T) {
 		D: 1.2,
 	}
 	tst.wantErr = false
-	tst.wantContributions = Contributions{
+	tst.wantProvenance = Provenance{
 		"bee": "0",
 		"D":   "0",
 	}
@@ -625,7 +626,7 @@ func TestLoad(t *testing.T) {
 		D: 1.2,
 	}
 	tst.wantErr = false
-	tst.wantContributions = Contributions{
+	tst.wantProvenance = Provenance{
 		"bee": "0",
 		"D":   "0",
 	}
@@ -686,7 +687,7 @@ func TestLoad(t *testing.T) {
 		},
 	}
 	tst.wantErr = false
-	tst.wantContributions = Contributions{
+	tst.wantProvenance = Provenance{
 		"A":            "0",
 		"B":            "0",
 		"D":            "0",
@@ -757,7 +758,7 @@ func TestLoad(t *testing.T) {
 		},
 	}
 	tst.wantErr = false
-	tst.wantContributions = Contributions{
+	tst.wantProvenance = Provenance{
 		"A":            "0",
 		"B":            "0",
 		"D":            "0",
@@ -819,7 +820,7 @@ func TestLoad(t *testing.T) {
 		"F": "my text",
 	}
 	tst.wantErr = false
-	tst.wantContributions = Contributions{
+	tst.wantProvenance = Provenance{
 		"A":            "0",
 		"B":            "0",
 		"D":            "0",
@@ -1043,7 +1044,7 @@ func TestLoad(t *testing.T) {
 			// Create an instance of the result based on the type of wantConfig
 			resultPtr := reflect.New(reflect.TypeOf(tt.wantConfig)).Interface()
 
-			gotMD, err := Load(tt.args.codec, tt.args.readers, tt.args.readerNames, tt.args.envOverrides, resultPtr)
+			gotMD, err := Load(tt.args.codec, tt.args.readers, tt.args.readerNames, tt.args.envOverrides, tt.args.defaults, resultPtr)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("Load() error = %v; wantErr: %v", err, tt.wantErr)
 			}
@@ -1074,8 +1075,8 @@ func TestLoad(t *testing.T) {
 				t.Fatalf("result did not match;\ngot  %#v\nwant %#v\nmd: %+v", resultComparator, tt.wantConfig, gotMD)
 			}
 
-			if !reflect.DeepEqual(gotMD.Contributions, tt.wantContributions) {
-				t.Fatalf("Contributions mismatch;\ngot  %#v\nwant %#v", gotMD.Contributions, tt.wantContributions)
+			if !reflect.DeepEqual(gotMD.Provenance, tt.wantProvenance) {
+				t.Fatalf("Provenance mismatch;\ngot  %#v\nwant %#v", gotMD.Provenance, tt.wantProvenance)
 			}
 
 			for _, k := range tt.wantIsDefineds {
@@ -1316,7 +1317,7 @@ func TestLoad_BadArgs(t *testing.T) {
 
 	var notPtr Struct
 
-	_, gotErr := Load(toml.Codec, makeStringReaders([]string{"\na=1\n"}), nil, nil, notPtr)
+	_, gotErr := Load(toml.Codec, makeStringReaders([]string{"\na=1\n"}), nil, nil, nil, notPtr)
 
 	// Didn't pass in &notPtr, so should get error
 	if gotErr == nil {
@@ -1325,12 +1326,44 @@ func TestLoad_BadArgs(t *testing.T) {
 
 	var nilPtr *Struct
 
-	_, gotErr = Load(toml.Codec, makeStringReaders([]string{"\na=1\n"}), nil, nil, nilPtr)
+	_, gotErr = Load(toml.Codec, makeStringReaders([]string{"\na=1\n"}), nil, nil, nil, nilPtr)
 
 	// Passing in nil, so should get error
 	if gotErr == nil {
 		t.Fatal("Should have got error for passing in nil")
 	}
+}
+
+func TestLoad_Special(t *testing.T) {
+	// Pass in a non-empty map
+	result := map[string]interface{}{
+		"a": map[string]interface{}{
+			"b": "initial",
+			"c": "initial",
+		},
+	}
+	readers := makeStringReaders([]string{
+		`
+		[a]
+		b = "from config"
+		d = "from config"
+		`,
+	})
+	_, err := Load(toml.Codec, readers, nil, nil, nil, &result)
+	if err != nil {
+		t.Fatalf("Got error for non-empty map: %v", err)
+	}
+	want := map[string]interface{}{
+		"a": map[string]interface{}{
+			"b": "from config",
+			"c": "initial",
+			"d": "from config",
+		},
+	}
+	if !reflect.DeepEqual(result, want) {
+		t.Fatalf("Non-empty map result didn't match want;\ngot:  %#v\nwant: %#v", result, want)
+	}
+
 }
 
 func makeStringReaders(ss []string) []io.Reader {

@@ -41,7 +41,12 @@ type EnvOverride struct {
 	Conv   func(envString string) interface{}
 }
 
-type Contributions map[string]string
+type Default struct {
+	Key Key
+	Val interface{}
+}
+
+type Provenance map[string]string
 
 type Metadata struct {
 	structFields []reflection.StructField
@@ -49,7 +54,7 @@ type Metadata struct {
 	configMap    *map[string]interface{}
 
 	// TODO: comment, mention how to print
-	Contributions Contributions
+	Provenance Provenance
 }
 
 // TODO: Comment
@@ -101,12 +106,13 @@ type decoder struct {
 }
 
 // readers will be used to populate the config. Later readers in the slice will take precedence and clobber the earlier.
-// envOverrides is a map from environment variable key to config key path (config.DB.Password is ["DB", "Password"]).
+// envOverrides is a mapping from environment variable key to config key path (config.DB.Password is Key{"DB", "Password"}).
+// defaults is a set of default values for keys.
 // Each of those envvars will result in overriding a key's value in the resulting struct.
 // absentKeys can be used to determine if defaults should be applied (as zero values might be valid and
 // not indicate absence).
 // result may be struct or map
-func Load(codec Codec, readers []io.Reader, readerNames []string, envOverrides []EnvOverride, result interface{},
+func Load(codec Codec, readers []io.Reader, readerNames []string, envOverrides []EnvOverride, defaults []Default, result interface{},
 ) (md Metadata, err error) {
 	decoder := decoder{codec}
 
@@ -122,26 +128,58 @@ func Load(codec Codec, readers []io.Reader, readerNames []string, envOverrides [
 		return md, errors.Errorf("result is nil %s", reflect.TypeOf(result))
 	}
 
-	// If result is a map, clear it out, otherwise our field checking will be broken.
-	// Consistency checks are not possible when the result is a map rather than a struct,
-	// so record that it is for later branching.
-	resultIsMap := false
-	if resultMap, ok := (result).(*map[string]interface{}); ok {
-		for k := range *resultMap {
-			delete(*resultMap, k)
-		}
-
-		resultIsMap = true
-	}
+	_, resultIsMap := result.(*map[string]interface{})
 
 	// Get info about the struct being populated. If result is actually a map and not a
 	// struct, this will be empty.
 	md.structFields = reflection.GetStructFields(result, TagName, codec)
 
-	md.Contributions = make(map[string]string)
+	md.Provenance = make(map[string]string)
 
 	// We'll use this to build up the combined config map
 	accumConfigMap := make(map[string]interface{})
+
+	//
+	// Defaults
+	//
+
+	// The presence of a default value for a field implies that the field is optional.
+	// Update the structFields appropriately.
+	defaultsMap := make(map[string]interface{})
+	for _, dflt := range defaults {
+		// If we're setting into a struct (vs a map), make sure the key is valid
+		if !resultIsMap {
+			sf, ok := findStructField(md.structFields, aliasedKeyFromKey(dflt.Key))
+			if !ok {
+				return md, errors.Errorf("defaults key not found in struct: %+v", dflt)
+			}
+
+			// Because a default was supplied, assume this field is optional
+			sf.Optional = true
+		}
+
+		if err := setMapByKey(defaultsMap, dflt.Key, dflt.Val, md.structFields); err != nil {
+			return md, errors.Wrapf(err, "setMapByKey failed for default: %+v", dflt)
+		}
+
+		md.Provenance[dflt.Key.String()] = "[default]"
+	}
+
+	if !resultIsMap {
+		// We ignore absentFields for now. Just checking types and vestigials.
+		_, err = decoder.verifyFieldsConsistency(
+			reflection.GetStructFields(defaultsMap, TagName, codec), md.structFields)
+		if err != nil {
+			return md, errors.Wrapf(err, "verifyFieldsConsistency failed for defaults")
+		}
+	}
+
+	// Merge the env map into the accum map (contributor updating happened above)
+	decoder.mergeMaps(accumConfigMap, defaultsMap, md.structFields)
+
+	//
+	// Readers
+	//
 
 	// Get the config (file) data from the readers
 	for i, r := range readers {
@@ -171,11 +209,15 @@ func Load(codec Codec, readers []io.Reader, readerNames []string, envOverrides [
 		}
 
 		// Merge the new map into the accum map, and collect contributor info
-		keysMerged := mergeMaps(accumConfigMap, newConfigMap, nil)
+		keysMerged := decoder.mergeMaps(accumConfigMap, newConfigMap, md.structFields)
 		for _, k := range keysMerged {
-			md.Contributions[k.String()] = readerName
+			md.Provenance[k.String()] = readerName
 		}
 	}
+
+	//
+	// Environment variables
+	//
 
 	// Now add in the environment var overrides
 	envMap := make(map[string]interface{})
@@ -202,7 +244,7 @@ func Load(codec Codec, readers []io.Reader, readerNames []string, envOverrides [
 			return md, errors.Wrapf(err, "setMapByKey failed for envOverride: %+v", eo)
 		}
 
-		md.Contributions[eo.Key.String()] = "$" + eo.EnvVar
+		md.Provenance[eo.Key.String()] = "$" + eo.EnvVar
 	}
 
 	if !resultIsMap {
@@ -215,15 +257,20 @@ func Load(codec Codec, readers []io.Reader, readerNames []string, envOverrides [
 	}
 
 	// Merge the env map into the accum map (contributor updating happened above)
-	mergeMaps(accumConfigMap, envMap, nil)
+	decoder.mergeMaps(accumConfigMap, envMap, md.structFields)
+
+	//
+	// Finalize
+	//
 
 	if resultIsMap {
 		// There's nothing more to do. With a simple map, there's no such thing
 		// as absent fields or required fields or field consistency.
-		// So we'll just return the map we've built up.
-		resultMap := (result).(*map[string]interface{})
-		*resultMap = make(map[string]interface{})
-		mergeMaps(*resultMap, accumConfigMap, nil)
+		resultMap := result.(*map[string]interface{})
+		if *resultMap == nil {
+			*resultMap = make(map[string]interface{})
+		}
+		decoder.mergeMaps(*resultMap, accumConfigMap, md.structFields)
 		md.configMap = resultMap
 		return md, nil
 	}
@@ -306,25 +353,43 @@ func setMapByKey(m map[string]interface{}, k Key, v interface{}, structFields []
 	return nil
 }
 
-// Merge src into dst, overwriting values. key must be nil on first call (the param
-// is used for recursive calls).
-func mergeMaps(dst, src map[string]interface{}, keyPrefix Key) (keysMerged []Key) {
-	for k, v := range src {
-		thisKey := append(keyPrefix, k)
+// Merge src into dst, overwriting values.
+// The keys of the leaves merged are returned.
+func (d decoder) mergeMaps(dst, src map[string]interface{}, structFields []reflection.StructField) (keysMerged []Key) {
+	// Get all the fields of the src map
+	srcStructFields := reflection.GetStructFields(src, TagName, d.codec)
 
-		if srcMap, ok := v.(map[string]interface{}); ok {
-			// Sub-map; recurse
-			dstMap, ok := dst[k].(map[string]interface{})
-			if !ok {
-				dstMap = make(map[string]interface{})
-				dst[k] = dstMap
+	for i, srcField := range srcStructFields {
+		if srcField.Kind == "map" {
+			// We only want to explicitly copy leaves. A map can be a leaf if it has
+			// children. Luckily, the ordering guarantee of structFields is such that
+			// the very next key will be a child, if one exists.
+			if i+1 == len(srcStructFields) {
+				// Fall through, as there is no next field
+			} else if aliasedKeyPrefixMatch(srcStructFields[i+1].AliasedKey, srcField.AliasedKey) {
+				// The next field is a child, so skip this one
+				continue
 			}
-
-			keysMerged = append(keysMerged, mergeMaps(dstMap, srcMap, thisKey)...)
-		} else {
-			dst[k] = v
-			keysMerged = append(keysMerged, thisKey)
 		}
+
+		// Find the value to merge for this field
+		var val interface{}
+		var key Key
+		currMap := src
+		for i, keyElem := range srcField.AliasedKey {
+			key = append(key, keyElem[0])
+			// Plain maps don't have multiple aliases, so keyElem[0] is sufficient
+			if i == len(srcField.AliasedKey)-1 {
+				// This is the last part of the key, so we have the value
+				val = currMap[keyElem[0]]
+				break
+			}
+			currMap = currMap[keyElem[0]].(map[string]interface{})
+		}
+
+		// This is a leaf
+		setMapByKey(dst, key, val, structFields)
+		keysMerged = append(keysMerged, key)
 	}
 
 	return keysMerged
@@ -363,7 +428,7 @@ CheckFieldsLoop:
 			}
 		}
 
-		noDeeper, err := d.fieldTypesConsistent(checkField, goldField)
+		noDeeper, err := d.fieldTypesConsistent(checkField, *goldField)
 		if err != nil {
 			return nil, errors.Wrapf(err, "field types not consistent; got %+v, want %+v", checkField, goldField)
 		}
@@ -492,7 +557,7 @@ func aliasedKeyPrefixMatch(ak, prefix reflection.AliasedKey) bool {
 	return aliasedKeysMatch(ak[:len(prefix)], prefix)
 }
 
-func findStructField(fields []reflection.StructField, targetKey reflection.AliasedKey) (reflection.StructField, bool) {
+func findStructField(fields []reflection.StructField, targetKey reflection.AliasedKey) (*reflection.StructField, bool) {
 	for _, field := range fields {
 		if len(field.AliasedKey) != len(targetKey) {
 			// Can't possibly match
@@ -501,12 +566,12 @@ func findStructField(fields []reflection.StructField, targetKey reflection.Alias
 
 		if aliasedKeysMatch(targetKey, field.AliasedKey) {
 			// We found the field
-			return field, true
+			return &field, true
 		}
 	}
 
 	// We exhausted the search without a match
-	return reflection.StructField{}, false
+	return nil, false
 }
 
 func aliasedKeyFromKey(key Key) reflection.AliasedKey {
