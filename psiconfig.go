@@ -46,15 +46,16 @@ type Default struct {
 	Val interface{}
 }
 
-type Provenance map[string]string
+type provenance struct {
+	ak  reflection.AliasedKey
+	src string
+}
 
 type Metadata struct {
 	structFields []reflection.StructField
 	absentFields []reflection.StructField
 	configMap    *map[string]interface{}
-
-	// TODO: comment, mention how to print
-	Provenance Provenance
+	provenance   []provenance
 }
 
 // TODO: Comment
@@ -101,6 +102,36 @@ func (md *Metadata) IsDefined(key ...string) (bool, error) {
 	return false, errors.Errorf("key does not exist among known fields: %+v", md.structFields)
 }
 
+func (md *Metadata) setProvenance(k Key, src string) {
+	ak := aliasedKeyFromKey(k)
+
+	// Try to find the full aliased key
+	if sf, ok := findStructField(md.structFields, ak); ok {
+		ak = sf.AliasedKey
+	}
+
+	// See if the new provenance is already in the slice (possibly with an alias)
+	for i := range md.provenance {
+		if aliasedKeysMatch(ak, md.provenance[i].ak) {
+			// Already present; update
+			md.provenance[i].src = src
+			return
+		}
+	}
+
+	// This is a new one
+	md.provenance = append(md.provenance, provenance{ak, src})
+}
+
+// TODO: command and printing help
+func (md *Metadata) Provenance() map[string]string {
+	result := make(map[string]string)
+	for _, p := range md.provenance {
+		result[keyFromAliasedKey(p.ak).String()] = p.src
+	}
+	return result
+}
+
 type decoder struct {
 	codec Codec
 }
@@ -134,8 +165,6 @@ func Load(codec Codec, readers []io.Reader, readerNames []string, envOverrides [
 	// struct, this will be empty.
 	md.structFields = reflection.GetStructFields(result, TagName, codec)
 
-	md.Provenance = make(map[string]string)
-
 	// We'll use this to build up the combined config map
 	accumConfigMap := make(map[string]interface{})
 
@@ -156,13 +185,16 @@ func Load(codec Codec, readers []io.Reader, readerNames []string, envOverrides [
 
 			// Because a default was supplied, assume this field is optional
 			sf.Optional = true
+
+			// Convert the key into one that prefers aliases
+			dflt.Key = keyFromAliasedKey(sf.AliasedKey)
 		}
 
 		if err := setMapByKey(defaultsMap, dflt.Key, dflt.Val, md.structFields); err != nil {
 			return md, errors.Wrapf(err, "setMapByKey failed for default: %+v", dflt)
 		}
 
-		md.Provenance[dflt.Key.String()] = "[default]"
+		md.setProvenance(dflt.Key, "[default]")
 	}
 
 	if !resultIsMap {
@@ -211,7 +243,7 @@ func Load(codec Codec, readers []io.Reader, readerNames []string, envOverrides [
 		// Merge the new map into the accum map, and collect contributor info
 		keysMerged := decoder.mergeMaps(accumConfigMap, newConfigMap, md.structFields)
 		for _, k := range keysMerged {
-			md.Provenance[k.String()] = readerName
+			md.setProvenance(k, readerName)
 		}
 	}
 
@@ -224,9 +256,13 @@ func Load(codec Codec, readers []io.Reader, readerNames []string, envOverrides [
 	for _, eo := range envOverrides {
 		// If we're setting into a struct (vs a map), make sure the key is valid
 		if !resultIsMap {
-			if _, ok := findStructField(md.structFields, aliasedKeyFromKey(eo.Key)); !ok {
+			sf, ok := findStructField(md.structFields, aliasedKeyFromKey(eo.Key))
+			if !ok {
 				return md, errors.Errorf("envOverride key not found in struct: %+v", eo)
 			}
+
+			// Convert the key into one that prefers aliases
+			eo.Key = keyFromAliasedKey(sf.AliasedKey)
 		}
 
 		valStr, ok := os.LookupEnv(eo.EnvVar)
@@ -244,7 +280,7 @@ func Load(codec Codec, readers []io.Reader, readerNames []string, envOverrides [
 			return md, errors.Wrapf(err, "setMapByKey failed for envOverride: %+v", eo)
 		}
 
-		md.Provenance[eo.Key.String()] = "$" + eo.EnvVar
+		md.setProvenance(eo.Key, "$"+eo.EnvVar)
 	}
 
 	if !resultIsMap {
@@ -289,7 +325,7 @@ func Load(codec Codec, readers []io.Reader, readerNames []string, envOverrides [
 			missingRequiredFields = append(missingRequiredFields, f)
 		}
 
-		md.Provenance[keyFromAliasedKey(f.AliasedKey).String()] = "[absent]"
+		md.setProvenance(keyFromAliasedKey(f.AliasedKey), "[absent]")
 	}
 	if len(missingRequiredFields) > 0 {
 		return md, errors.Errorf("missing required fields: %+v", missingRequiredFields)
@@ -321,7 +357,10 @@ func setMapByKey(m map[string]interface{}, k Key, v interface{}, structFields []
 
 	currMap := m
 	for i := range aliasedKey {
-		keyElem := k[i]
+		// The input key might be using struct field names rather than aliases, which
+		// will result in the final unmarshaling not finding those fields. So we'll
+		// prefer to use the alias, which is the last element of AliasedKeyElem.
+		keyElem := aliasedKey[i][len(aliasedKey[i])-1]
 
 		// If the field already exists in the map, use the key/field that's there,
 		// otherwise build the map at keyElem.
@@ -587,8 +626,8 @@ func aliasedKeyFromKey(key Key) reflection.AliasedKey {
 func keyFromAliasedKey(ak reflection.AliasedKey) Key {
 	result := make(Key, len(ak))
 	for i := range ak {
-		// Just use the first component of the alias
-		result[i] = ak[i][0]
+		// Prefer the last component, as it's the alias
+		result[i] = ak[i][len(ak[i])-1]
 	}
 	return result
 }

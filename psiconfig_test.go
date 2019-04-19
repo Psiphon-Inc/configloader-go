@@ -170,7 +170,7 @@ func TestLoad(t *testing.T) {
 		args              args
 		env               map[string]string
 		wantConfig        interface{}
-		wantProvenance    Provenance
+		wantProvenance    map[string]string
 		wantIsDefineds    []Key
 		wantNotIsDefineds []Key
 		wantErrIsDefineds []Key
@@ -196,8 +196,8 @@ func TestLoad(t *testing.T) {
 		B1: 123,
 	}
 	tst.wantErr = false
-	tst.wantProvenance = Provenance{
-		"a1": "0",
+	tst.wantProvenance = map[string]string{
+		"A1": "0",
 		"B1": "0",
 	}
 	tst.wantIsDefineds = []Key{
@@ -227,8 +227,8 @@ func TestLoad(t *testing.T) {
 		B1: 123,
 	}
 	tst.wantErr = false
-	tst.wantProvenance = Provenance{
-		"a1": "0",
+	tst.wantProvenance = map[string]string{
+		"A1": "0",
 		"B1": "0",
 	}
 	tst.wantIsDefineds = []Key{
@@ -261,7 +261,7 @@ func TestLoad(t *testing.T) {
 		"B1": int64(123),
 	}
 	tst.wantErr = false
-	tst.wantProvenance = Provenance{
+	tst.wantProvenance = map[string]string{
 		"a1": "0",
 		"B1": "0",
 	}
@@ -313,12 +313,12 @@ func TestLoad(t *testing.T) {
 		},
 	}
 	tst.wantErr = false
-	tst.wantProvenance = Provenance{
+	tst.wantProvenance = map[string]string{
 		"A":        "[absent]",
-		"sect1.a1": "third",
-		"sect1.b1": "second",
-		"sect2.a1": "first",
-		"sect2.b1": "third",
+		"sect1.A1": "third",
+		"sect1.B1": "second",
+		"sect2.A1": "first",
+		"sect2.B1": "third",
 	}
 	tst.wantIsDefineds = []Key{
 		{"sect1"}, {"Sect1"},
@@ -379,12 +379,12 @@ func TestLoad(t *testing.T) {
 		},
 	}
 	tst.wantErr = false
-	tst.wantProvenance = Provenance{
+	tst.wantProvenance = map[string]string{
 		"A":        "[absent]",
-		"sect1.a1": "third",
-		"sect1.b1": "second",
-		"sect2.a1": "first",
-		"sect2.b1": "third",
+		"sect1.A1": "third",
+		"sect1.B1": "second",
+		"sect2.A1": "first",
+		"sect2.B1": "third",
 	}
 	tst.wantIsDefineds = []Key{
 		{"sect1"}, {"Sect1"},
@@ -408,9 +408,6 @@ func TestLoad(t *testing.T) {
 	tst.args.codec = toml.Codec
 	tst.args.readers = makeStringReaders([]string{
 		`
-		[sect1]
-		a1 = "s1.a1 from file"
-		b1 = 111
 		[sect2]
 		a1 = "s2.a1 from file"
 		b1 = 222
@@ -418,6 +415,11 @@ func TestLoad(t *testing.T) {
 	})
 	tst.args.readerNames = []string{"first"}
 	tst.args.envOverrides = []EnvOverride{
+		{
+			EnvVar: "S1A1_FROM_ENV",
+			Key:    Key{"S1", "A1"},
+			Conv:   nil,
+		},
 		{
 			EnvVar: "S1B1_FROM_ENV",
 			Key:    Key{"sect1", "b1"},
@@ -433,31 +435,32 @@ func TestLoad(t *testing.T) {
 		},
 		{
 			EnvVar: "WILL_BE_UNUSED",
-			Key:    Key{"sect1", "a1"},
+			Key:    Key{"S2", "B1"},
 			Conv:   nil,
 		},
 	}
 	tst.env = map[string]string{
+		"S1A1_FROM_ENV": "S1A1 from env",
 		"S1B1_FROM_ENV": "333333",
-		"S2A1_FROM_ENV": "from env",
+		"S2A1_FROM_ENV": "S2A1 from env",
 	}
 	tst.wantConfig = subStruct{
 		S1: simpleStruct{
-			A1: "s1.a1 from file",
+			A1: "S1A1 from env",
 			B1: 333333,
 		},
 		S2: simpleStruct{
-			A1: "from env",
+			A1: "S2A1 from env",
 			B1: 222,
 		},
 	}
 	tst.wantErr = false
-	tst.wantProvenance = Provenance{
+	tst.wantProvenance = map[string]string{
 		"A":        "[absent]",
-		"sect1.a1": "first",
-		"sect1.b1": "$S1B1_FROM_ENV",
-		"sect2.a1": "$S2A1_FROM_ENV",
-		"sect2.b1": "first",
+		"sect1.A1": "$S1A1_FROM_ENV",
+		"sect1.B1": "$S1B1_FROM_ENV",
+		"sect2.A1": "$S2A1_FROM_ENV",
+		"sect2.B1": "first",
 	}
 	tst.wantIsDefineds = nil
 	tst.wantNotIsDefineds = nil
@@ -514,7 +517,7 @@ func TestLoad(t *testing.T) {
 		},
 	}
 	tst.wantErr = false
-	tst.wantProvenance = Provenance{
+	tst.wantProvenance = map[string]string{
 		"sect1.a1": "first",
 		"sect1.b1": "$S1B1_FROM_ENV",
 		"sect2.a1": "$S2A1_FROM_ENV",
@@ -581,6 +584,7 @@ func TestLoad(t *testing.T) {
 	tests = append(tests, tst)
 
 	//----------------------------------------------------------------------
+
 	tst = test{}
 	tst.name = "tags"
 	tst.args.codec = toml.Codec
@@ -597,8 +601,8 @@ func TestLoad(t *testing.T) {
 		D: 1.2,
 	}
 	tst.wantErr = false
-	tst.wantProvenance = Provenance{
-		"A":   "[absent]",
+	tst.wantProvenance = map[string]string{
+		"eh":  "[absent]",
 		"bee": "0",
 		"D":   "0",
 	}
@@ -614,6 +618,7 @@ func TestLoad(t *testing.T) {
 	tests = append(tests, tst)
 
 	//----------------------------------------------------------------------
+
 	tst = test{}
 	tst.name = "tags json"
 	tst.args.codec = json.Codec
@@ -630,8 +635,8 @@ func TestLoad(t *testing.T) {
 		D: 1.2,
 	}
 	tst.wantErr = false
-	tst.wantProvenance = Provenance{
-		"A":   "[absent]",
+	tst.wantProvenance = map[string]string{
+		"eh":  "[absent]",
 		"bee": "0",
 		"D":   "0",
 	}
@@ -647,6 +652,7 @@ func TestLoad(t *testing.T) {
 	tests = append(tests, tst)
 
 	//----------------------------------------------------------------------
+
 	tst = test{}
 	tst.name = "advanced types"
 	tst.args.codec = toml.Codec
@@ -692,14 +698,14 @@ func TestLoad(t *testing.T) {
 		},
 	}
 	tst.wantErr = false
-	tst.wantProvenance = Provenance{
+	tst.wantProvenance = map[string]string{
 		"A":            "0",
 		"B":            "0",
 		"D":            "0",
 		"E":            "0",
 		"F":            "0",
-		"cee_three.a1": "0",
-		"cee_three.b1": "0",
+		"cee_three.A1": "0",
+		"cee_three.B1": "0",
 	}
 	tst.wantIsDefineds = []Key{
 		{"C", "A1"},
@@ -712,6 +718,7 @@ func TestLoad(t *testing.T) {
 	tests = append(tests, tst)
 
 	//----------------------------------------------------------------------
+
 	tst = test{}
 	tst.name = "advanced types json"
 	tst.args.codec = json.Codec
@@ -763,14 +770,14 @@ func TestLoad(t *testing.T) {
 		},
 	}
 	tst.wantErr = false
-	tst.wantProvenance = Provenance{
+	tst.wantProvenance = map[string]string{
 		"A":            "0",
 		"B":            "0",
 		"D":            "0",
 		"E":            "0",
 		"F":            "0",
-		"cee_three.a1": "0",
-		"cee_three.b1": "0",
+		"cee_three.A1": "0",
+		"cee_three.B1": "0",
 	}
 	tst.wantIsDefineds = []Key{
 		{"C", "A1"},
@@ -783,6 +790,7 @@ func TestLoad(t *testing.T) {
 	tests = append(tests, tst)
 
 	//----------------------------------------------------------------------
+
 	tst = test{}
 	tst.name = "advanced types map"
 	tst.args.codec = toml.Codec
@@ -825,7 +833,7 @@ func TestLoad(t *testing.T) {
 		"F": "my text",
 	}
 	tst.wantErr = false
-	tst.wantProvenance = Provenance{
+	tst.wantProvenance = map[string]string{
 		"A":            "0",
 		"B":            "0",
 		"D":            "0",
@@ -843,6 +851,7 @@ func TestLoad(t *testing.T) {
 	tests = append(tests, tst)
 
 	//----------------------------------------------------------------------
+
 	tst = test{}
 	// BurntSushi/toml will fill the struct with zero values and give no error
 	type structWithString struct {
@@ -851,7 +860,7 @@ func TestLoad(t *testing.T) {
 	type structWithSub struct {
 		Struct structWithString
 	}
-	tst.name = "wrong type for struct"
+	tst.name = "error: wrong type for struct"
 	tst.args.codec = toml.Codec
 	tst.args.readers = makeStringReaders([]string{
 		`
@@ -865,8 +874,9 @@ func TestLoad(t *testing.T) {
 	tests = append(tests, tst)
 
 	//----------------------------------------------------------------------
+
 	tst = test{}
-	tst.name = "wrong type for struct json"
+	tst.name = "error: wrong type for struct json"
 	tst.args.codec = json.Codec
 	tst.args.readers = makeStringReaders([]string{
 		`
@@ -880,6 +890,7 @@ func TestLoad(t *testing.T) {
 	tests = append(tests, tst)
 
 	//----------------------------------------------------------------------
+
 	tst = test{}
 	tst.name = "error: multi-reader name mismatch"
 	tst.args.codec = toml.Codec
@@ -910,6 +921,7 @@ func TestLoad(t *testing.T) {
 	tests = append(tests, tst)
 
 	//----------------------------------------------------------------------
+
 	tst = test{}
 	tst.name = "error: bad toml"
 	tst.args.codec = toml.Codec
@@ -924,6 +936,7 @@ func TestLoad(t *testing.T) {
 	tests = append(tests, tst)
 
 	//----------------------------------------------------------------------
+
 	tst = test{}
 	tst.name = "error: bad json"
 	tst.args.codec = json.Codec
@@ -938,6 +951,7 @@ func TestLoad(t *testing.T) {
 	tests = append(tests, tst)
 
 	//----------------------------------------------------------------------
+
 	tst = test{}
 	tst.name = "error: env override with unfindable key"
 	tst.args.codec = toml.Codec
@@ -976,6 +990,7 @@ func TestLoad(t *testing.T) {
 	tests = append(tests, tst)
 
 	//----------------------------------------------------------------------
+
 	tst = test{}
 	tst.name = "error: env override with empty key"
 	tst.args.codec = toml.Codec
@@ -1014,6 +1029,7 @@ func TestLoad(t *testing.T) {
 	tests = append(tests, tst)
 
 	//----------------------------------------------------------------------
+
 	tst = test{}
 	tst.name = "error: explicit type fail"
 	tst.args.codec = toml.Codec
@@ -1027,6 +1043,7 @@ func TestLoad(t *testing.T) {
 	tests = append(tests, tst)
 
 	//----------------------------------------------------------------------
+
 	tst = test{}
 	tst.name = "error: explicit type fail json"
 	tst.args.codec = json.Codec
@@ -1035,6 +1052,104 @@ func TestLoad(t *testing.T) {
 	})
 	tst.wantConfig = hardTypeStruct{}
 	tst.wantErr = true
+	tests = append(tests, tst)
+
+	//----------------------------------------------------------------------
+
+	tst = test{}
+	tst.name = "defaults"
+	tst.args.codec = toml.Codec
+	tst.args.readers = makeStringReaders([]string{
+		// Not B is absent even though not tagged optional
+		`
+		D = 1.2
+		`,
+	})
+	tst.args.readerNames = nil
+	tst.args.envOverrides = nil
+	tst.args.defaults = []Default{
+		{
+			Key: Key{"A"}, // struct key, not alias
+			Val: "default A",
+		},
+		{
+			Key: Key{"bee"}, // alias
+			Val: true,
+		},
+		{
+			Key: Key{"D"},
+			Val: float32(2.3),
+		},
+	}
+	tst.wantConfig = tagStruct{
+		A: "default A",
+		B: true,
+		D: 1.2,
+	}
+	tst.wantErr = false
+	tst.wantProvenance = map[string]string{
+		"eh":  "[default]",
+		"bee": "[default]",
+		// C is an ignored field
+		"D": "0",
+	}
+	tst.wantIsDefineds = []Key{
+		{"A"}, {"a"}, {"eh"},
+		{"bee"}, {"b"}, {"B"},
+		{"d"}, {"D"},
+	}
+	tst.wantNotIsDefineds = []Key{}
+	tst.wantErrIsDefineds = []Key{
+		{"c"}, {"C"},
+	}
+	tests = append(tests, tst)
+
+	//----------------------------------------------------------------------
+
+	tst = test{}
+	tst.name = "defaults map"
+	tst.args.codec = toml.Codec
+	tst.args.readers = makeStringReaders([]string{
+		`
+		D = 1.2
+		`,
+	})
+	tst.args.readerNames = nil
+	tst.args.envOverrides = nil
+	tst.args.defaults = []Default{
+		{
+			Key: Key{"A"},
+			Val: "default A",
+		},
+		{
+			Key: Key{"bee"}, // alias
+			Val: true,
+		},
+		{
+			Key: Key{"D"},
+			Val: float32(2.3),
+		},
+	}
+	tst.wantConfig = map[string]interface{}{
+		"A":   "default A",
+		"bee": true,
+		"D":   1.2,
+	}
+	tst.wantErr = false
+	tst.wantProvenance = map[string]string{
+		"A":   "[default]",
+		"bee": "[default]",
+		"D":   "0",
+	}
+	tst.wantIsDefineds = []Key{
+		{"A"},
+		{"bee"},
+		{"D"},
+	}
+	tst.wantNotIsDefineds = []Key{
+		{"c"}, {"a"},
+	}
+	tst.wantErrIsDefineds = []Key{}
 	tests = append(tests, tst)
 
 	//----------------------------------------------------------------------
@@ -1080,14 +1195,14 @@ func TestLoad(t *testing.T) {
 				t.Fatalf("result did not match;\ngot  %#v\nwant %#v\nmd: %+v", resultComparator, tt.wantConfig, gotMD)
 			}
 
-			if !reflect.DeepEqual(gotMD.Provenance, tt.wantProvenance) {
-				t.Fatalf("Provenance mismatch;\ngot  %#v\nwant %#v", gotMD.Provenance, tt.wantProvenance)
+			if !reflect.DeepEqual(gotMD.Provenance(), tt.wantProvenance) {
+				t.Fatalf("Provenance mismatch;\ngot  %#v\nwant %#v", gotMD.Provenance(), tt.wantProvenance)
 			}
 
 			for _, k := range tt.wantIsDefineds {
 				def, err := gotMD.IsDefined(k...)
 				if err != nil {
-					t.Fatalf("IsDefined should not get error: %v; key: %#v; metadata: %#v", err, k, gotMD)
+					t.Fatalf("IsDefined should not get error: %v;\nkey: %#v;\nmetadata: %#v", err, k, gotMD)
 				}
 				if !def {
 					t.Fatalf("key should be defined: %#v; metadata: %#v", k, gotMD)
