@@ -288,6 +288,8 @@ func Load(codec Codec, readers []io.Reader, readerNames []string, envOverrides [
 		if !f.Optional {
 			missingRequiredFields = append(missingRequiredFields, f)
 		}
+
+		md.Provenance[keyFromAliasedKey(f.AliasedKey).String()] = "[absent]"
 	}
 	if len(missingRequiredFields) > 0 {
 		return md, errors.Errorf("missing required fields: %+v", missingRequiredFields)
@@ -578,6 +580,15 @@ func aliasedKeyFromKey(key Key) reflection.AliasedKey {
 	result := make(reflection.AliasedKey, len(key))
 	for i := range key {
 		result[i] = reflection.AliasedKeyElem{key[i]}
+	}
+	return result
+}
+
+func keyFromAliasedKey(ak reflection.AliasedKey) Key {
+	result := make(Key, len(ak))
+	for i := range ak {
+		// Just use the first component of the alias
+		result[i] = ak[i][0]
 	}
 	return result
 }

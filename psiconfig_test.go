@@ -314,6 +314,7 @@ func TestLoad(t *testing.T) {
 	}
 	tst.wantErr = false
 	tst.wantProvenance = Provenance{
+		"A":        "[absent]",
 		"sect1.a1": "third",
 		"sect1.b1": "second",
 		"sect2.a1": "first",
@@ -379,6 +380,7 @@ func TestLoad(t *testing.T) {
 	}
 	tst.wantErr = false
 	tst.wantProvenance = Provenance{
+		"A":        "[absent]",
 		"sect1.a1": "third",
 		"sect1.b1": "second",
 		"sect2.a1": "first",
@@ -451,6 +453,7 @@ func TestLoad(t *testing.T) {
 	}
 	tst.wantErr = false
 	tst.wantProvenance = Provenance{
+		"A":        "[absent]",
 		"sect1.a1": "first",
 		"sect1.b1": "$S1B1_FROM_ENV",
 		"sect2.a1": "$S2A1_FROM_ENV",
@@ -595,6 +598,7 @@ func TestLoad(t *testing.T) {
 	}
 	tst.wantErr = false
 	tst.wantProvenance = Provenance{
+		"A":   "[absent]",
 		"bee": "0",
 		"D":   "0",
 	}
@@ -627,6 +631,7 @@ func TestLoad(t *testing.T) {
 	}
 	tst.wantErr = false
 	tst.wantProvenance = Provenance{
+		"A":   "[absent]",
 		"bee": "0",
 		"D":   "0",
 	}
