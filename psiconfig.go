@@ -37,10 +37,8 @@ func (k Key) String() string {
 
 type EnvOverride struct {
 	EnvVar string
-	// MUST refer to the key as used in the TOML (as opposed to the struct).
-	// (If this is problematic, it can be changed, with effort.)
-	Key  Key
-	Conv func(envString string) interface{}
+	Key    Key
+	Conv   func(envString string) interface{}
 }
 
 type Contributions map[string]string
@@ -182,6 +180,13 @@ func Load(codec Codec, readers []io.Reader, readerNames []string, envOverrides [
 	// Now add in the environment var overrides
 	envMap := make(map[string]interface{})
 	for _, eo := range envOverrides {
+		// If we're setting into a struct (vs a map), make sure the key is valid
+		if !resultIsMap {
+			if _, ok := findStructField(md.structFields, aliasedKeyFromKey(eo.Key)); !ok {
+				return md, errors.Errorf("envOverride key not found in struct: %+v", eo)
+			}
+		}
+
 		valStr, ok := os.LookupEnv(eo.EnvVar)
 		if !ok {
 			continue
@@ -193,8 +198,8 @@ func Load(codec Codec, readers []io.Reader, readerNames []string, envOverrides [
 			valI = eo.Conv(valStr)
 		}
 
-		if err := setMapByKey(envMap, eo.Key, valI); err != nil {
-			return md, errors.Wrapf(err, "setMapByKey failed for EnvOverride: %+v", eo)
+		if err := setMapByKey(envMap, eo.Key, valI, md.structFields); err != nil {
+			return md, errors.Wrapf(err, "setMapByKey failed for envOverride: %+v", eo)
 		}
 
 		md.Contributions[eo.Key.String()] = "$" + eo.EnvVar
@@ -256,24 +261,49 @@ func Load(codec Codec, readers []io.Reader, readerNames []string, envOverrides [
 	return md, nil
 }
 
-func setMapByKey(m map[string]interface{}, k Key, v interface{}) error {
-	if len(k) == 0 || m == nil {
-		return errors.Errorf("bad state")
-	} else if len(k) == 1 {
-		// We're on the last step of our search
-		m[k[0]] = v
-		return nil
+func setMapByKey(m map[string]interface{}, k Key, v interface{}, structFields []reflection.StructField) error {
+	aliasedKey := aliasedKeyFromKey(k)
+
+	// We'll try to find a full aliasedKey from the provided struct fields (if any)
+	sf, ok := findStructField(structFields, aliasedKeyFromKey(k))
+	if ok {
+		aliasedKey = sf.AliasedKey
 	}
 
-	// We're at an intermediate step in the map
-	if m[k[0]] == nil {
-		m[k[0]] = make(map[string]interface{})
-	} else if _, ok := m[k[0]].(map[string]interface{}); !ok {
-		// The map key exists, but is not itself a map. Not okay.
-		return errors.Errorf("Map subtree is not a map; key suffix: %#v; map subtree: %#v", k, m)
+	currMap := m
+	for i := range aliasedKey {
+		keyElem := k[i]
+
+		// If the field already exists in the map, use the key/field that's there,
+		// otherwise build the map at keyElem.
+		for currMapKey := range currMap {
+			if aliasedKeyElemsMatch(aliasedKey[i], reflection.AliasedKeyElem{currMapKey}) {
+				keyElem = currMapKey
+				break
+			}
+		}
+
+		// We're either at the leaf or at an intermediate node.
+		if i == len(aliasedKey)-1 {
+			// Leaf
+			currMap[keyElem] = v
+			break
+		}
+
+		// Intermediate. Make sure it's a map.
+		if currMap[keyElem] == nil {
+			// Either it doesn't exist or it exists and is nil
+			currMap[keyElem] = make(map[string]interface{})
+		} else if _, ok := currMap[keyElem].(map[string]interface{}); !ok {
+			// The map key exists, but is not itself a map. Not okay.
+			return errors.Errorf("Map subtree is not a map; full key: %+v; map subtree key: %+v; map: %+v", k, k[:i+1], m)
+		}
+
+		// Get the sub-map for the next iteration of the loop
+		currMap = currMap[keyElem].(map[string]interface{})
 	}
 
-	return setMapByKey(m[k[0]].(map[string]interface{}), k[1:], v)
+	return nil
 }
 
 // Merge src into dst, overwriting values. key must be nil on first call (the param
@@ -365,8 +395,6 @@ func (d decoder) fieldTypesConsistent(check, gold reflection.StructField) (noDee
 	/*
 		Examples:
 		- time.Time implements encoding.TextUnmarshaler, so expectedType will be "string"
-
-
 	*/
 
 	if gold.ExpectedType != "" {
@@ -435,22 +463,26 @@ func aliasedKeysMatch(ak1, ak2 reflection.AliasedKey) bool {
 		ak1Elem := ak1[i]
 		ak2Elem := ak2[i]
 
-		for _, ak1Alias := range ak1Elem {
-			for _, ak2Alias := range ak2Elem {
-				// Do a case-insensitive comparison, since BurntSushi/toml does
-				if strings.EqualFold(ak1Alias, ak2Alias) {
-					goto AliasMatched
-				}
-			}
+		if !aliasedKeyElemsMatch(ak1Elem, ak2Elem) {
+			return false
 		}
-		// We failed to match any of the aliases
-		return false
 
-	AliasMatched:
 		// Aliases matched for this element of the key; continue through the elements
 	}
 
 	return true
+}
+
+func aliasedKeyElemsMatch(elem1, elem2 reflection.AliasedKeyElem) bool {
+	for _, alias1 := range elem1 {
+		for _, alias2 := range elem2 {
+			// Do a case-insensitive comparison, since encoding/json and BurntSushi/toml do
+			if strings.EqualFold(alias1, alias2) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func aliasedKeyPrefixMatch(ak, prefix reflection.AliasedKey) bool {

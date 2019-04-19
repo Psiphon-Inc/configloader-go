@@ -435,7 +435,13 @@ func Test_getStructFields(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "empty map",
+			obj:  map[string]interface{}{},
+			want: []StructField{},
+		},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := GetStructFields(tt.obj, confTag, codec)

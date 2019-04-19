@@ -16,10 +16,13 @@ import (
 )
 
 func Test_setMapByKey(t *testing.T) {
+	// TODO: Tests that use structFields
+
 	type args struct {
-		m map[string]interface{}
-		k Key
-		v interface{}
+		m            map[string]interface{}
+		k            Key
+		v            interface{}
+		structFields []reflection.StructField
 	}
 	type test struct {
 		name    string
@@ -48,17 +51,23 @@ func Test_setMapByKey(t *testing.T) {
 	tst.args.v = "val"
 	tst.wantErr = false
 	tests = append(tests, tst)
+
 	//-----------------------------------------------------------------------
+
 	tst = test{}
 	tst.name = "overwrite"
 	tst.args.m = map[string]interface{}{
-		"a": "initial",
+		"a": map[string]interface{}{
+			"b": "initial",
+		},
 	}
-	tst.args.k = Key{"a"}
+	tst.args.k = Key{"a", "b"}
 	tst.args.v = "val"
 	tst.wantErr = false
 	tests = append(tests, tst)
+
 	//-----------------------------------------------------------------------
+
 	tst = test{}
 	tst.name = "nil intermediate"
 	tst.args.m = map[string]interface{}{
@@ -68,7 +77,9 @@ func Test_setMapByKey(t *testing.T) {
 	tst.args.v = "val"
 	tst.wantErr = false
 	tests = append(tests, tst)
+
 	//-----------------------------------------------------------------------
+
 	tst = test{}
 	tst.name = "error"
 	tst.args.m = map[string]interface{}{
@@ -78,11 +89,12 @@ func Test_setMapByKey(t *testing.T) {
 	tst.args.v = "val"
 	tst.wantErr = true
 	tests = append(tests, tst)
+
 	//-----------------------------------------------------------------------
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := setMapByKey(tt.args.m, tt.args.k, tt.args.v)
+			err := setMapByKey(tt.args.m, tt.args.k, tt.args.v, tt.args.structFields)
 			if err != nil != tt.wantErr {
 				t.Fatalf("setMapByKey() error = %v, wantErr %v", err, tt.wantErr)
 			}
@@ -449,6 +461,68 @@ func TestLoad(t *testing.T) {
 	tests = append(tests, tst)
 
 	//----------------------------------------------------------------------
+	tst = test{}
+	tst.name = "env override map"
+	tst.args.codec = toml.Codec
+	tst.args.readers = makeStringReaders([]string{
+		`
+		[sect1]
+		a1 = "s1.a1 from file"
+		b1 = 111
+		[sect2]
+		a1 = "s2.a1 from file"
+		b1 = 222
+		`,
+	})
+	tst.args.readerNames = []string{"first"}
+	tst.args.envOverrides = []EnvOverride{
+		{
+			EnvVar: "S1B1_FROM_ENV",
+			Key:    Key{"sect1", "b1"},
+			Conv: func(v string) interface{} {
+				i, _ := strconv.ParseInt(v, 10, 64)
+				return i
+			},
+		},
+		{
+			EnvVar: "S2A1_FROM_ENV",
+			Key:    Key{"sect2", "a1"},
+			Conv:   nil,
+		},
+		{
+			EnvVar: "WILL_BE_UNUSED",
+			Key:    Key{"sect1", "a1"},
+			Conv:   nil,
+		},
+	}
+	tst.env = map[string]string{
+		"S1B1_FROM_ENV": "333333",
+		"S2A1_FROM_ENV": "from env",
+	}
+	tst.wantConfig = map[string]interface{}{
+		"sect1": map[string]interface{}{
+			"a1": "s1.a1 from file",
+			"b1": int64(333333),
+		},
+		"sect2": map[string]interface{}{
+			"a1": "from env",
+			"b1": int64(222),
+		},
+	}
+	tst.wantErr = false
+	tst.wantContributions = Contributions{
+		"sect1.a1": "first",
+		"sect1.b1": "$S1B1_FROM_ENV",
+		"sect2.a1": "$S2A1_FROM_ENV",
+		"sect2.b1": "first",
+	}
+	tst.wantIsDefineds = nil
+	tst.wantNotIsDefineds = nil
+	tst.wantErrIsDefineds = nil
+	tests = append(tests, tst)
+
+	//----------------------------------------------------------------------
+
 	tst = test{}
 	tst.name = "error: vestigial key"
 	tst.args.codec = toml.Codec
@@ -992,7 +1066,6 @@ func TestLoad(t *testing.T) {
 							t.Fatalf("types bad for %v: %v vs %v", k, reflect.TypeOf(r[k]), reflect.TypeOf(w[k]))
 						}
 					}
-
 					rstruct := reflection.GetStructFields(r, TagName, tt.args.codec)
 					wstruct := reflection.GetStructFields(w, TagName, tt.args.codec)
 					t.Fatalf("structfields\ngot  %+v\nwant %+v", rstruct, wstruct)
