@@ -1,3 +1,5 @@
+// Package reflection provides GetStructFields, allowing for the collection of structural
+// information about structs or maps.
 package reflection
 
 import (
@@ -6,113 +8,60 @@ import (
 	"strings"
 )
 
+// Codec is an interface which must be implemented and passed to GetStructFields.
+// It provides abstraction for the underlying config file type (like TOML or JSON).
 type Codec interface {
 	// Returns true if the struct tag indicates that the field is not unmarshaled (like `json:"-"`)
 	IsStructFieldIgnored(st reflect.StructTag) bool
 
-	// Returns name of the field in the config file (like `json:"new_name"`)
+	// Returns the alias name of the field from the struct tag (like `json:"new_name"`)
 	// or empty string if the field has no alias
 	GetStructFieldAlias(st reflect.StructTag) string
 }
 
-// One component of an aliased key. Contains equivalent aliases for this component.
+// AliasedKeyElem is one component of an aliased key. Contains equivalent aliases for this component.
+//
+// Guarantee: The struct tag alias will be last.
 type AliasedKeyElem []string
 
-// A key that can be written multiple ways, all of which should match. Each element may have aliases.
+// AliasedKey is a key that can be written multiple ways, all of which should match.
+// Each element may have aliases. None of the elements will be empty.
 type AliasedKey []AliasedKeyElem
 
-// Information about field in a struct
+// StructField holds information about field in a struct.
 type StructField struct {
-	AliasedKey   AliasedKey
-	Type         string
-	Kind         string
-	Optional     bool
+	// The key for the field within the struct (including possible aliase due to struct tags)
+	AliasedKey AliasedKey
+
+	// reflect's Type() for the field. Like "time.Time".
+	Type string
+	// reflect's Kind() for the field. Like "struct".
+	Kind string
+
+	// true if the field has been flagged as optional in the struct tag; false otherwise.
+	Optional bool
+
+	// If the strut tag contains an explicit type, it will be provided here.
 	ExpectedType string
 }
 
+// decoder holds the tag name and codec used by a call to GetStructFields
 type decoder struct {
 	tagName string
 	codec   Codec
 }
 
 /*
-GetStructFields returns the Exported fields found in obj.
+GetStructFields returns information about the structure of obj. It can be passed either
+a struct or a map. The non-exported fields of a struct are ignored.
+
+tagName is the struct tag name that will be used to flag whether a field is optional and
+if there is an explicit type that should be associated with it.
+
+codec implements Codec and is used to determine if fields have an alias or should be
+ignored. (I.e., with the `json:` or `toml:` struct tags.)
+
 The returned slice is guaranteed to have branches before leaves.
-tagName is the string used to flag "optional" (and set explicit expected type).
-
-Example with struct:
-	type S struct {
-		F     string `toml:"eff" conf:"optional"`
-		Inner struct {
-			InnerF int
-		}
-		Time time.Time // implements encoding.UnmarshalText
-
-		unexported string
-	}
-
-	var s S
-	fmt.Printf("%+v\n", GetStructFields(s))
-Result:
-	[{
-		aliasedKey: [
-			[F eff]
-		] typ: string kind: string optional: true expectedType:
-	} {
-		aliasedKey: [
-			[Inner]
-		] typ: struct {
-			InnerF int
-		}
-		kind: struct optional: false expectedType:
-	} {
-		aliasedKey: [
-			[Inner][InnerF]
-		] typ: int kind: int optional: false expectedType:
-	} {
-		aliasedKey: [
-			[Time]
-		] typ: time.Time kind: struct optional: false expectedType: string
-	}]
-
-Example with map:
-	m := map[string]interface{}{
-	    "a": "aaa",
-	    "b": 123,
-	    "c": time.Now(),
-	    "d": map[string]interface{}{
-	        "d1": "d1d1",
-	    },
-	    "e": []bool{true, false},
-	}
-	fmt.Printf("%+v\n", GetStructFields(m))
-Result:
-	[{
-		aliasedKey: [
-			[a]
-		] typ: string kind: string optional: false expectedType:
-	} {
-		aliasedKey: [
-			[b]
-		] typ: int kind: int optional: false expectedType:
-	} {
-		aliasedKey: [
-			[c]
-		] typ: time.Time kind: struct optional: false expectedType: string
-	} {
-		aliasedKey: [
-			[d]
-		] typ: map[string] interface {}
-		kind: map optional: false expectedType:
-	} {
-		aliasedKey: [
-			[d][d1]
-		] typ: string kind: string optional: false expectedType:
-	} {
-		aliasedKey: [
-			[e]
-		] typ: [] bool kind: slice optional: false expectedType:
-	}]
 */
 func GetStructFields(obj interface{}, tagName string, codec Codec) []StructField {
 	d := decoder{tagName, codec}
