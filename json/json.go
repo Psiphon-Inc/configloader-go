@@ -1,3 +1,4 @@
+// Package json provides JSON Codec methods for use with psiconfig.
 package json
 
 import (
@@ -9,9 +10,9 @@ import (
 	"github.com/pkg/errors"
 )
 
-// Implements psiconfig.Codec
 type codecImplmentation struct{}
 
+// Codec is the psiconfig.Codec implementation.
 var Codec = codecImplmentation{}
 
 func (codec codecImplmentation) Marshal(v interface{}) ([]byte, error) {
