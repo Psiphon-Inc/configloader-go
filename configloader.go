@@ -65,8 +65,12 @@ type Provenances []Provenance
 type Metadata struct {
 	structFields []reflection.StructField
 	absentFields []reflection.StructField
-	configMap    *map[string]interface{}
-	Provenances  Provenances
+
+	// A map version of the config
+	ConfigMap map[string]interface{}
+
+	// The source for each config field
+	Provenances Provenances
 }
 
 // TODO: Comment
@@ -86,8 +90,8 @@ func (md *Metadata) IsDefined(key ...string) (bool, error) {
 
 	// If the result was a map rather than a struct, then we don't have structFields
 	// or absentFields and we'll have to look in the map that was produced.
-	if len(md.structFields) == 0 && md.configMap != nil {
-		currMap := *md.configMap
+	if len(md.structFields) == 0 {
+		currMap := md.ConfigMap
 		for i := range key {
 			if _, ok := currMap[key[i]]; !ok {
 				return false, nil
@@ -330,7 +334,7 @@ func Load(codec Codec, readers []io.Reader, readerNames []string, envOverrides [
 			*resultMap = make(map[string]interface{})
 		}
 		decoder.mergeMaps(*resultMap, accumConfigMap, md.structFields)
-		md.configMap = resultMap
+		md.ConfigMap = *resultMap
 		return md, nil
 	}
 
@@ -358,12 +362,24 @@ func Load(codec Codec, readers []io.Reader, readerNames []string, envOverrides [
 	// Marshal it and then re-unmarshal it into the destination struct.
 	buf, err := codec.Marshal(accumConfigMap)
 	if err != nil {
-		return md, errors.Wrap(err, "Re-marshaling config map failed")
+		return md, errors.Wrap(err, "Re-marshaling accumulated config map failed")
 	}
-
 	err = codec.Unmarshal(buf, result)
 	if err != nil {
-		return md, errors.Wrap(err, "Failed to decode re-encoded config")
+		return md, errors.Wrap(err, "Failed to unmarshal result struct")
+	}
+
+	// In order to populate Metadata.ConfigMap, we need to marshal our final struct and
+	// then unmarshal it into a map. The reason we can't just use accumConfigMap is that
+	// there may have been values already set into the result struct and we can't get at
+	// them without going the long way.
+	buf, err = codec.Marshal(result)
+	if err != nil {
+		return md, errors.Wrap(err, "Failed to marshal final result struct")
+	}
+	err = codec.Unmarshal(buf, &md.ConfigMap)
+	if err != nil {
+		return md, errors.Wrap(err, "Failed to unmarshal final config map")
 	}
 
 	return md, nil

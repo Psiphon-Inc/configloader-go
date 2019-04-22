@@ -1523,7 +1523,7 @@ func TestLoad_Special(t *testing.T) {
 		d = "from config"
 		`,
 		})
-		_, err := Load(toml.Codec, readers, nil, nil, nil, &result)
+		md, err := Load(toml.Codec, readers, nil, nil, nil, &result)
 		if err != nil {
 			t.Fatalf("Got error for non-empty map: %v", err)
 		}
@@ -1536,6 +1536,14 @@ func TestLoad_Special(t *testing.T) {
 		}
 		if !reflect.DeepEqual(result, want) {
 			t.Fatalf("Non-empty map result didn't match want;\ngot:  %#v\nwant: %#v", result, want)
+		}
+		compareProvenances(t, md.Provenances, map[string]string{
+			"a.b": "0",
+			//"a.c": "[absent]", // Doesn't end up in provenances at all
+			"a.d": "0",
+		})
+		if !reflect.DeepEqual(md.ConfigMap, want) {
+			t.Fatalf("md.ConfigMap didn't match;\ngot:  %#v\nwant: %#v", md.ConfigMap, want)
 		}
 	}
 
@@ -1557,7 +1565,7 @@ func TestLoad_Special(t *testing.T) {
 			b = "from config"
 			`,
 		})
-		_, err := Load(toml.Codec, readers, nil, nil, nil, &result)
+		md, err := Load(toml.Codec, readers, nil, nil, nil, &result)
 		if err != nil {
 			t.Fatalf("Got error for non-zero struct: %v", err)
 		}
@@ -1568,15 +1576,18 @@ func TestLoad_Special(t *testing.T) {
 		if !reflect.DeepEqual(result, want) {
 			t.Fatalf("Non-zero struct result didn't match want;\ngot:  %#v\nwant: %#v", result, want)
 		}
+		compareProvenances(t, md.Provenances, map[string]string{
+			"A": "[absent]",
+			"B": "0",
+		})
+		wantConfigMap := map[string]interface{}{
+			"A": "pre-filled",
+			"B": "from config",
+		}
+		if !reflect.DeepEqual(md.ConfigMap, wantConfigMap) {
+			t.Fatalf("md.ConfigMap didn't match;\ngot:  %#v\nwant: %#v", md.ConfigMap, wantConfigMap)
+		}
 	}
-}
-
-func makeStringReaders(ss []string) []io.Reader {
-	res := make([]io.Reader, len(ss))
-	for i := range ss {
-		res[i] = strings.NewReader(ss[i])
-	}
-	return res
 }
 
 func TestKey_String(t *testing.T) {
@@ -1660,5 +1671,31 @@ func TestProvenances_String(t *testing.T) {
 				t.Errorf("Provenances.String() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func makeStringReaders(ss []string) []io.Reader {
+	res := make([]io.Reader, len(ss))
+	for i := range ss {
+		res[i] = strings.NewReader(ss[i])
+	}
+	return res
+}
+
+func compareProvenances(t *testing.T, got Provenances, want map[string]string) {
+	if len(got) != len(want) {
+		t.Fatalf("Provenances: len(got) != len(want);\ngot:  %#v\nwant: %#v", got, want)
+	}
+	for key, src := range want {
+		found := false
+		for _, prov := range got {
+			if prov.Key.String() == key && prov.Src == src {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("Provenance mismatch; failed to find %s:%s\ngot:  %#v\nwant: %#v", key, src, got, want)
+		}
 	}
 }
