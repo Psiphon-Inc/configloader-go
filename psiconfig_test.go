@@ -1,4 +1,4 @@
-package psiconfig
+package configloader
 
 import (
 	"encoding"
@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Psiphon-Inc/psiphon-go-config/json"
-	"github.com/Psiphon-Inc/psiphon-go-config/reflection"
-	"github.com/Psiphon-Inc/psiphon-go-config/toml"
+	"github.com/Psiphon-Inc/configloader-go/json"
+	"github.com/Psiphon-Inc/configloader-go/reflection"
+	"github.com/Psiphon-Inc/configloader-go/toml"
 )
 
 func Test_setMapByKey(t *testing.T) {

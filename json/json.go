@@ -1,4 +1,4 @@
-// Package json provides JSON Codec methods for use with psiconfig.
+// Package json provides JSON Codec methods for use with configloader.
 package json
 
 import (
@@ -6,13 +6,13 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/Psiphon-Inc/psiphon-go-config/reflection"
+	"github.com/Psiphon-Inc/configloader-go/reflection"
 	"github.com/pkg/errors"
 )
 
 type codecImplmentation struct{}
 
-// Codec is the psiconfig.Codec implementation.
+// Codec is the configloader.Codec implementation.
 var Codec = codecImplmentation{}
 
 func (codec codecImplmentation) Marshal(v interface{}) ([]byte, error) {

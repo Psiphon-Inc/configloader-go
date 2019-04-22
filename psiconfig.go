@@ -1,4 +1,4 @@
-package psiconfig
+package configloader
 
 import (
 	"io"
@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/Psiphon-Inc/psiphon-go-config/reflection"
+	"github.com/Psiphon-Inc/configloader-go/reflection"
 	"github.com/pkg/errors"
 )
 

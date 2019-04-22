@@ -1,4 +1,4 @@
-# psiphon-go-config
+# configloader-go
 
 TODO: Does IsDefined return error if the whole sub-struct is absent? (Or only for pointer-to-struct?)
 

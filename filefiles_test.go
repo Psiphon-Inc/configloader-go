@@ -1,4 +1,4 @@
-package psiconfig
+package configloader
 
 import (
 	"fmt"

@@ -4,7 +4,9 @@ package reflection
 
 import (
 	"encoding"
+	"fmt"
 	"reflect"
+	"sort"
 	"strings"
 )
 
@@ -33,13 +35,13 @@ type StructField struct {
 	// The key for the field within the struct (including possible aliase due to struct tags)
 	AliasedKey AliasedKey
 
+	// true if the field has been flagged as optional in the struct tag; false otherwise.
+	Optional bool
+
 	// reflect's Type() for the field. Like "time.Time".
 	Type string
 	// reflect's Kind() for the field. Like "struct".
 	Kind string
-
-	// true if the field has been flagged as optional in the struct tag; false otherwise.
-	Optional bool
 
 	// If the strut tag contains an explicit type, it will be provided here.
 	ExpectedType string
@@ -110,7 +112,16 @@ func (d decoder) getStructFieldsRecursive(structValue reflect.Value, currField S
 	// Recurse into maps
 	case reflect.Map:
 		mapFields := make([]StructField, 0)
+		// We'll collect and sort the keys, mostly to make testing easier later (and
+		// because there won't be so many fields that this is a performance problem).
+		var keys []reflect.Value
 		for _, key := range structValue.MapKeys() {
+			keys = append(keys, key)
+		}
+
+		sort.Slice(keys, func(i, j int) bool { return keys[i].String() < keys[j].String() })
+
+		for _, key := range keys {
 			fieldValue := structValue.MapIndex(key)
 
 			thisField, recurseValue := d.makeField(
@@ -195,4 +206,23 @@ func (d decoder) makeField(keyPrefix AliasedKey, name string, structTag *reflect
 	}
 
 	return sf, recurseValue
+}
+
+// String is intended to be used for making example output more readable.
+func (sf StructField) String() string {
+	sb := strings.Builder{}
+
+	sb.WriteString("StructField{\n")
+	sb.WriteString(fmt.Sprintf("\tAliasedKey: %v\n", sf.AliasedKey))
+	sb.WriteString(fmt.Sprintf("\tOptional: %v\n", sf.Optional))
+	sb.WriteString(fmt.Sprintf("\tType: %v\n", sf.Type))
+	sb.WriteString(fmt.Sprintf("\tKind: %v\n", sf.Kind))
+	if sf.ExpectedType != "" {
+		sb.WriteString(fmt.Sprintf("\tExpectedType: %v\n", sf.ExpectedType))
+	} else {
+		sb.WriteString(fmt.Sprintf("\tExpectedType:\n"))
+	}
+	sb.WriteString("}")
+
+	return sb.String()
 }

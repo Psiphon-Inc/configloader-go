@@ -1,4 +1,4 @@
-// Package toml provides TOML Codec methods for use with psiconfig.
+// Package toml provides TOML Codec methods for use with configloader.
 package toml
 
 import (
@@ -7,12 +7,12 @@ import (
 	"strings"
 
 	"github.com/BurntSushi/toml"
-	"github.com/Psiphon-Inc/psiphon-go-config/reflection"
+	"github.com/Psiphon-Inc/configloader-go/reflection"
 )
 
 type codecImplmentation struct{}
 
-// Codec is the psiconfig.Codec implementation.
+// Codec is the configloader.Codec implementation.
 var Codec = codecImplmentation{}
 
 func (codec codecImplmentation) Marshal(v interface{}) ([]byte, error) {

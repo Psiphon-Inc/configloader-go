@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Psiphon-Inc/psiphon-go-config/reflection"
-	"github.com/Psiphon-Inc/psiphon-go-config/toml"
+	"github.com/Psiphon-Inc/configloader-go/reflection"
+	"github.com/Psiphon-Inc/configloader-go/toml"
 )
 
 func ExampleGetStructFields_withStruct() {
@@ -22,57 +22,41 @@ func ExampleGetStructFields_withStruct() {
 	}
 
 	var s S
-	fmt.Printf("%#v\n", reflection.GetStructFields(s, tagName, toml.Codec))
+	structFields := reflection.GetStructFields(s, tagName, toml.Codec)
+
+	for _, sf := range structFields {
+		fmt.Println(sf)
+	}
 
 	// Output:
-	/*
-		[] reflection.StructField {
-		  reflection.StructField {
-		    AliasedKey: reflection.AliasedKey {
-		      reflection.AliasedKeyElem {
-		        "F",
-		        "eff"
-		      }
-		    },
-		    Type: "string",
-		    Kind: "string",
-		    Optional: true,
-		    ExpectedType: ""
-		  }, reflection.StructField {
-		    AliasedKey: reflection.AliasedKey {
-		      reflection.AliasedKeyElem {
-		        "Inner"
-		      }
-		    },
-		    Type: "struct { InnerF int }",
-		    Kind: "struct",
-		    Optional: false,
-		    ExpectedType: ""
-		  }, reflection.StructField {
-		    AliasedKey: reflection.AliasedKey {
-		      reflection.AliasedKeyElem {
-		        "Inner"
-		      }, reflection.AliasedKeyElem {
-		        "InnerF"
-		      }
-		    },
-		    Type: "int",
-		    Kind: "int",
-		    Optional: false,
-		    ExpectedType: ""
-		  }, reflection.StructField {
-		    AliasedKey: reflection.AliasedKey {
-		      reflection.AliasedKeyElem {
-		        "Time"
-		      }
-		    },
-		    Type: "time.Time",
-		    Kind: "struct",
-		    Optional: false,
-		    ExpectedType: "string"
-		  }
-		}
-	*/
+	// StructField{
+	// 	AliasedKey: [[F eff]]
+	// 	Optional: true
+	// 	Type: string
+	// 	Kind: string
+	// 	ExpectedType:
+	// }
+	// StructField{
+	// 	AliasedKey: [[Inner]]
+	// 	Optional: false
+	// 	Type: struct { InnerF int }
+	// 	Kind: struct
+	// 	ExpectedType:
+	// }
+	// StructField{
+	// 	AliasedKey: [[Inner] [InnerF]]
+	// 	Optional: false
+	// 	Type: int
+	// 	Kind: int
+	// 	ExpectedType:
+	// }
+	// StructField{
+	// 	AliasedKey: [[Time]]
+	// 	Optional: false
+	// 	Type: time.Time
+	// 	Kind: struct
+	// 	ExpectedType: string
+	// }
 }
 
 func ExampleGetStructFields_withMap() {
@@ -88,74 +72,53 @@ func ExampleGetStructFields_withMap() {
 		"e": []bool{true, false},
 	}
 
-	fmt.Printf("%#v\n", reflection.GetStructFields(m, tagName, toml.Codec))
+	structFields := reflection.GetStructFields(m, tagName, toml.Codec)
+
+	for _, sf := range structFields {
+		fmt.Println(sf)
+	}
 
 	// Output:
-	/*
-			[] reflection.StructField {
-		  reflection.StructField {
-		    AliasedKey: reflection.AliasedKey {
-		      reflection.AliasedKeyElem {
-		        "e"
-		      }
-		    },
-		    Type: "[]bool",
-		    Kind: "slice",
-		    Optional: false,
-		    ExpectedType: ""
-		  }, reflection.StructField {
-		    AliasedKey: reflection.AliasedKey {
-		      reflection.AliasedKeyElem {
-		        "a"
-		      }
-		    },
-		    Type: "string",
-		    Kind: "string",
-		    Optional: false,
-		    ExpectedType: ""
-		  }, reflection.StructField {
-		    AliasedKey: reflection.AliasedKey {
-		      reflection.AliasedKeyElem {
-		        "b"
-		      }
-		    },
-		    Type: "int",
-		    Kind: "int",
-		    Optional: false,
-		    ExpectedType: ""
-		  }, reflection.StructField {
-		    AliasedKey: reflection.AliasedKey {
-		      reflection.AliasedKeyElem {
-		        "c"
-		      }
-		    },
-		    Type: "time.Time",
-		    Kind: "struct",
-		    Optional: false,
-		    ExpectedType: "string"
-		  }, reflection.StructField {
-		    AliasedKey: reflection.AliasedKey {
-		      reflection.AliasedKeyElem {
-		        "d"
-		      }
-		    },
-		    Type: "map[string]interface {}",
-		    Kind: "map",
-		    Optional: false,
-		    ExpectedType: ""
-		  }, reflection.StructField {
-		    AliasedKey: reflection.AliasedKey {
-		      reflection.AliasedKeyElem {
-		        "d"
-		      }, reflection.AliasedKeyElem {
-		        "d1"
-		      }
-		    },
-		    Type: "string",
-		    Kind: "string",
-		    Optional: false,
-		    ExpectedType: ""
-		  }
-		}
-	*/
+	// StructField{
+	// 	AliasedKey: [[a]]
+	// 	Optional: false
+	// 	Type: string
+	// 	Kind: string
+	// 	ExpectedType:
+	// }
+	// StructField{
+	// 	AliasedKey: [[b]]
+	// 	Optional: false
+	// 	Type: int
+	// 	Kind: int
+	// 	ExpectedType:
+	// }
+	// StructField{
+	// 	AliasedKey: [[c]]
+	// 	Optional: false
+	// 	Type: time.Time
+	// 	Kind: struct
+	// 	ExpectedType: string
+	// }
+	// StructField{
+	// 	AliasedKey: [[d]]
+	// 	Optional: false
+	// 	Type: map[string]interface {}
+	// 	Kind: map
+	// 	ExpectedType:
+	// }
+	// StructField{
+	// 	AliasedKey: [[d] [d1]]
+	// 	Optional: false
+	// 	Type: string
+	// 	Kind: string
+	// 	ExpectedType:
+	// }
+	// StructField{
+	// 	AliasedKey: [[e]]
+	// 	Optional: false
+	// 	Type: []bool
+	// 	Kind: slice
+	// 	ExpectedType:
+	// }
 }
