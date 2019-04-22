@@ -93,7 +93,7 @@ func TestFindConfigFiles(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "mutiple files",
+			name: "mutiple files, all existing",
 			args: args{
 				filenames:   []string{"file1", "file2", "file3"},
 				searchPaths: []string{"testdata", "testdata/nonexistent", "testdata/subdir1"},
@@ -101,6 +101,42 @@ func TestFindConfigFiles(t *testing.T) {
 			wantReaderNames: []string{
 				"testdata/file1",
 				"testdata/file2",
+				"testdata/subdir1/file3",
+			},
+			wantErr: false,
+		},
+		{
+			name: "mutiple files, all existing",
+			args: args{
+				filenames:   []string{"file1", "file2", "file3"},
+				searchPaths: []string{"testdata", "testdata/nonexistent", "testdata/subdir1"},
+			},
+			wantReaderNames: []string{
+				"testdata/file1",
+				"testdata/file2",
+				"testdata/subdir1/file3",
+			},
+			wantErr: false,
+		},
+		{
+			name: "mutiple files, no overrides existing",
+			args: args{
+				filenames:   []string{"file1", "file1_override1", "file1_override2"},
+				searchPaths: []string{"testdata", "testdata/nonexistent", "testdata/subdir1"},
+			},
+			wantReaderNames: []string{
+				"testdata/file1",
+			},
+			wantErr: false,
+		},
+		{
+			name: "mutiple files, some overrides existing",
+			args: args{
+				filenames:   []string{"file1", "file1_override1", "file3"},
+				searchPaths: []string{"testdata", "testdata/nonexistent", "testdata/subdir1"},
+			},
+			wantReaderNames: []string{
+				"testdata/file1",
 				"testdata/subdir1/file3",
 			},
 			wantErr: false,

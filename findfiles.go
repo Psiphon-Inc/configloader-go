@@ -12,7 +12,7 @@ import (
 var osOpen = os.Open
 
 // TODO: Comment
-// filenames is the names of the files that will contribute to this config. All files will
+// filenames are the names of the files that will contribute to this config. All files will
 // be used, and each will be merged on top of the previous ones. The first filename must
 // exist, but subsequent names are optional. The intention is that the first file is the
 // primary config, and the other files optionally override that.
@@ -31,10 +31,6 @@ func FindConfigFiles(filenames, searchPaths []string) (readers []io.Reader, clos
 		return nil, nil, nil, err
 	}
 
-	readers = make([]io.Reader, 0, len(filenames))
-	closers = make([]io.Closer, 0, len(filenames))
-	readerNames = make([]string, 0, len(filenames))
-
 	defer func() {
 		// In case of error, close the closers
 		if err != nil {
@@ -45,7 +41,7 @@ func FindConfigFiles(filenames, searchPaths []string) (readers []io.Reader, clos
 	}()
 
 FilenamesLoop:
-	for _, fname := range filenames {
+	for i, fname := range filenames {
 		for _, path := range searchPaths {
 			fpath := filepath.Join(path, fname)
 			var f *os.File
@@ -63,9 +59,12 @@ FilenamesLoop:
 			continue FilenamesLoop
 		}
 
-		// We failed to find the file in the search paths
-		err = errors.Errorf("failed to find file '%v' in search paths: %+v", fname, searchPaths)
-		return nil, nil, nil, err
+		// We failed to find the file in the search paths. This is only an error if this
+		// is the first filename in filenames (i.e., not an override).
+		if i == 0 {
+			err = errors.Errorf("failed to find file '%v' in search paths: %+v", fname, searchPaths)
+			return nil, nil, nil, err
+		}
 	}
 
 	return readers, closers, readerNames, nil
