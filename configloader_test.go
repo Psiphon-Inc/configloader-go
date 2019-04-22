@@ -1060,7 +1060,7 @@ func TestLoad(t *testing.T) {
 	tst.name = "defaults"
 	tst.args.codec = toml.Codec
 	tst.args.readers = makeStringReaders([]string{
-		// Not B is absent even though not tagged optional
+		// Note B is absent even though not tagged optional
 		`
 		D = 1.2
 		`,
@@ -1155,6 +1155,59 @@ func TestLoad(t *testing.T) {
 	//----------------------------------------------------------------------
 
 	tst = test{}
+	tst.name = "defaults with empty section -- struct"
+	tst.args.codec = toml.Codec
+	tst.args.readers = makeStringReaders([]string{
+		`
+		A = "aaaa"
+		[sect1]
+		# This is an empty section with examples
+		# A1 = "1.a1a1"
+		# B1 = 123
+		[sect2]
+		A1 = "2.a1a1"
+		B1 = 321
+		`,
+	})
+	tst.args.readerNames = nil
+	tst.args.envOverrides = nil
+	tst.args.defaults = []Default{
+		{
+			Key: Key{"sect1", "A1"},
+			Val: "default A1",
+		},
+		{
+			Key: Key{"sect1", "B1"},
+			Val: 789,
+		},
+	}
+	tst.wantConfig = subStruct{
+		A: "aaaa",
+		S1: simpleStruct{
+			A1: "default A1",
+			B1: 789,
+		},
+		S2: simpleStruct{
+			A1: "2.a1a1",
+			B1: 321,
+		},
+	}
+	tst.wantErr = false
+	tst.wantProvenances = map[string]string{
+		"A":        "0",
+		"sect1.A1": "[default]",
+		"sect1.B1": "[default]",
+		"sect2.A1": "0",
+		"sect2.B1": "0",
+	}
+	tst.wantIsDefineds = []Key{}
+	tst.wantNotIsDefineds = []Key{}
+	tst.wantErrIsDefineds = []Key{}
+	tests = append(tests, tst)
+
+	//----------------------------------------------------------------------
+
+	tst = test{}
 	tst.name = "error: bad defaults key"
 	tst.args.codec = toml.Codec
 	tst.args.readers = makeStringReaders([]string{
@@ -1234,21 +1287,7 @@ func TestLoad(t *testing.T) {
 				t.Fatalf("result did not match;\ngot  %#v\nwant %#v\nmd: %+v", resultComparator, tt.wantConfig, gotMD)
 			}
 
-			if len(gotMD.Provenances) != len(tt.wantProvenances) {
-				t.Fatalf("len(gotMD.Provenances) != len(tt.wantProvenances);\ngot:  %#v\nwant: %#v", gotMD.Provenances, tt.wantProvenances)
-			}
-			for key, src := range tt.wantProvenances {
-				found := false
-				for _, prov := range gotMD.Provenances {
-					if prov.Key.String() == key && prov.Src == src {
-						found = true
-						break
-					}
-				}
-				if !found {
-					t.Fatalf("Provenance mismatch; failed to find %s:%s\ngot:  %#v\nwant: %#v", key, src, gotMD.Provenances, tt.wantProvenances)
-				}
-			}
+			compareProvenances(t, gotMD.Provenances, tt.wantProvenances)
 
 			for _, k := range tt.wantIsDefineds {
 				def, err := gotMD.IsDefined(k...)
@@ -1684,7 +1723,7 @@ func makeStringReaders(ss []string) []io.Reader {
 
 func compareProvenances(t *testing.T, got Provenances, want map[string]string) {
 	if len(got) != len(want) {
-		t.Fatalf("Provenances: len(got) != len(want);\ngot:  %#v\nwant: %#v", got, want)
+		t.Fatalf("Provenances: len(got) != len(want);\ngot:  %s\nwant: %s", got, want)
 	}
 	for key, src := range want {
 		found := false
@@ -1695,7 +1734,7 @@ func compareProvenances(t *testing.T, got Provenances, want map[string]string) {
 			}
 		}
 		if !found {
-			t.Fatalf("Provenance mismatch; failed to find %s:%s\ngot:  %#v\nwant: %#v", key, src, got, want)
+			t.Fatalf("Provenance mismatch; failed to find %s:%s\ngot:  %#v\nwant: %s", key, src, got, want)
 		}
 	}
 }

@@ -438,16 +438,22 @@ func setMapByKey(m map[string]interface{}, k Key, v interface{}, structFields []
 func (d decoder) mergeMaps(dst, src map[string]interface{}, structFields []reflection.StructField) (keysMerged []Key) {
 	// Get all the fields of the src map
 	srcStructFields := reflection.GetStructFields(src, TagName, d.codec)
+	dstStructFields := reflection.GetStructFields(dst, TagName, d.codec)
 
 	for i, srcField := range srcStructFields {
 		if srcField.Kind == "map" {
-			// We only want to explicitly copy leaves. A map can be a leaf if it has
+			// We only want to explicitly copy leaves. A map can be a leaf if it has no
 			// children. Luckily, the ordering guarantee of structFields is such that
 			// the very next key will be a child, if one exists.
-			if i+1 == len(srcStructFields) {
-				// Fall through, as there is no next field
-			} else if aliasedKeyPrefixMatch(srcStructFields[i+1].AliasedKey, srcField.AliasedKey) {
-				// The next field is a child, so skip this one
+			// Additionally, we don't want clobber existing maps with empty ones.
+			if (i+1 < len(srcStructFields)) && aliasedKeyPrefixMatch(srcStructFields[i+1].AliasedKey, srcField.AliasedKey) {
+				// This map is not a leaf, as the next field is a child
+				continue
+			}
+
+			if _, existsInDst := findStructField(dstStructFields, srcField.AliasedKey); existsInDst {
+				// This map (or at least a field at this key) already exists in dst.
+				// We won't clobber it.
 				continue
 			}
 		}
@@ -638,15 +644,16 @@ func aliasedKeyPrefixMatch(ak, prefix reflection.AliasedKey) bool {
 }
 
 func findStructField(fields []reflection.StructField, targetKey reflection.AliasedKey) (*reflection.StructField, bool) {
-	for _, field := range fields {
-		if len(field.AliasedKey) != len(targetKey) {
+	for i := range fields {
+		fieldPtr := &fields[i]
+		if len(fieldPtr.AliasedKey) != len(targetKey) {
 			// Can't possibly match
 			continue
 		}
 
-		if aliasedKeysMatch(targetKey, field.AliasedKey) {
+		if aliasedKeysMatch(targetKey, fieldPtr.AliasedKey) {
 			// We found the field
-			return &field, true
+			return fieldPtr, true
 		}
 	}
 
