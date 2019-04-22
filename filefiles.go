@@ -20,22 +20,32 @@ var osOpen = os.Open
 // When the file is found, the search will stop. If this is set to {""}, the filenames
 // will be used unmodified. (So, absolute paths could be set in filenames and they will be
 // used directly.)
-func FindConfigFiles(filenames, searchPaths []string) (readClosers []io.ReadCloser, readerNames []string, err error) {
+func FindConfigFiles(filenames, searchPaths []string) (readers []io.Reader, closers []io.Closer, readerNames []string, err error) {
 	if len(filenames) == 0 {
 		err = errors.Errorf("no filenames provided")
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	if len(searchPaths) == 0 {
 		err = errors.Errorf("no searchPaths provided")
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
-	readClosers = make([]io.ReadCloser, len(filenames))
-	readerNames = make([]string, len(filenames))
+	readers = make([]io.Reader, 0, len(filenames))
+	closers = make([]io.Closer, 0, len(filenames))
+	readerNames = make([]string, 0, len(filenames))
+
+	defer func() {
+		// In case of error, close the closers
+		if err != nil {
+			for i := range closers {
+				closers[i].Close()
+			}
+		}
+	}()
 
 FilenamesLoop:
-	for i, fname := range filenames {
+	for _, fname := range filenames {
 		for _, path := range searchPaths {
 			fpath := filepath.Join(path, fname)
 			var f *os.File
@@ -43,25 +53,20 @@ FilenamesLoop:
 			if os.IsNotExist(err) {
 				continue
 			} else if err != nil {
-				for _, rc := range readClosers {
-					if rc != nil {
-						rc.Close()
-					}
-				}
-
 				err = errors.Wrapf(err, "file open failed for %s", fpath)
-				return nil, nil, err
+				return nil, nil, nil, err
 			}
 
-			readClosers[i] = f
-			readerNames[i] = filepath.ToSlash(fpath)
+			readers = append(readers, f)
+			closers = append(closers, f)
+			readerNames = append(readerNames, filepath.ToSlash(fpath))
 			continue FilenamesLoop
 		}
 
 		// We failed to find the file in the search paths
 		err = errors.Errorf("failed to find file '%v' in search paths: %+v", fname, searchPaths)
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
-	return readClosers, readerNames, nil
+	return readers, closers, readerNames, nil
 }

@@ -142,7 +142,15 @@ func TestFindConfigFiles(t *testing.T) {
 				osOpen = tt.osOpen
 			}
 
-			gotReadClosers, gotReaderNames, err := FindConfigFiles(tt.args.filenames, tt.args.searchPaths)
+			gotReaders, gotClosers, gotReaderNames, err := FindConfigFiles(tt.args.filenames, tt.args.searchPaths)
+
+			defer func() {
+				for i := range gotClosers {
+					if err := gotClosers[i].Close(); err != nil {
+						t.Fatalf("failed to close closer for '%v': %v", gotReaderNames[i], err)
+					}
+				}
+			}()
 
 			// Restore the original function
 			osOpen = os.Open
@@ -155,15 +163,18 @@ func TestFindConfigFiles(t *testing.T) {
 				t.Fatalf("FindConfigFiles() gotReaderNames = %v, want %v", gotReaderNames, tt.wantReaderNames)
 			}
 
-			if len(gotReadClosers) != len(gotReaderNames) {
-				t.Fatalf("length mismatch: len(gotReadClosers)=%v; len(gotReaderNames)=%v", len(gotReadClosers), len(gotReaderNames))
+			if len(gotReaders) != len(gotReaderNames) {
+				t.Fatalf("length mismatch: len(gotReaders)=%v; len(gotReaderNames)=%v", len(gotReaders), len(gotReaderNames))
 			}
 
-			// We can't compare readClosers, but our test files simply contain the
+			if len(gotReaders) != len(gotClosers) {
+				t.Fatalf("length mismatch: len(gotReaders)=%v; len(gotClosers)=%v", len(gotReaders), len(gotClosers))
+			}
+
+			// We can't compare io.Readers, but our test files simply contain the
 			// path+filename, so we can read and check.
-			for i := range gotReadClosers {
-				buf, err := ioutil.ReadAll(gotReadClosers[i])
-				gotReadClosers[i].Close()
+			for i := range gotReaders {
+				buf, err := ioutil.ReadAll(gotReaders[i])
 				if err != nil {
 					t.Fatalf("failed to read readCloser with name '%v'", gotReaderNames[i])
 				}

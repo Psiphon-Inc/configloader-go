@@ -1,10 +1,12 @@
 package configloader
 
 import (
+	"fmt"
 	"io"
 	"io/ioutil"
 	"os"
 	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -35,6 +37,11 @@ func (k Key) String() string {
 	return strings.Join(k, ".")
 }
 
+// MarshalText implements encoding.TextMarshaler. To be used with logging (especially of Provenances).
+func (k Key) MarshalText() (text []byte, err error) {
+	return []byte(k.String()), nil
+}
+
 type EnvOverride struct {
 	EnvVar string
 	Key    Key
@@ -46,16 +53,20 @@ type Default struct {
 	Val interface{}
 }
 
-type provenance struct {
-	ak  reflection.AliasedKey
-	src string
+type Provenance struct {
+	// We store aliasedKey as well as Key for the purposes of accessing and printing by caller
+	aliasedKey reflection.AliasedKey
+	Key        Key
+	Src        string
 }
+
+type Provenances []Provenance
 
 type Metadata struct {
 	structFields []reflection.StructField
 	absentFields []reflection.StructField
 	configMap    *map[string]interface{}
-	provenance   []provenance
+	Provenances  Provenances
 }
 
 // TODO: Comment
@@ -111,25 +122,37 @@ func (md *Metadata) setProvenance(k Key, src string) {
 	}
 
 	// See if the new provenance is already in the slice (possibly with an alias)
-	for i := range md.provenance {
-		if aliasedKeysMatch(ak, md.provenance[i].ak) {
+	for i := range md.Provenances {
+		if aliasedKeysMatch(ak, md.Provenances[i].aliasedKey) {
 			// Already present; update
-			md.provenance[i].src = src
+			md.Provenances[i].Src = src
 			return
 		}
 	}
 
 	// This is a new one
-	md.provenance = append(md.provenance, provenance{ak, src})
+	prov := Provenance{
+		aliasedKey: ak,
+		Key:        keyFromAliasedKey(ak),
+		Src:        src,
+	}
+	md.Provenances = append(md.Provenances, prov)
 }
 
-// TODO: command and printing help
-func (md *Metadata) Provenance() map[string]string {
-	result := make(map[string]string)
-	for _, p := range md.provenance {
-		result[keyFromAliasedKey(p.ak).String()] = p.src
+func (prov Provenance) String() string {
+	return fmt.Sprintf("'%s':'%s'", prov.Key, prov.Src)
+}
+
+func (provs Provenances) String() string {
+	// We want to print sorted by Key, so do that first
+	sort.Slice(provs, func(i, j int) bool { return provs[i].Key.String() < provs[j].Key.String() })
+
+	provStrings := make([]string, len(provs))
+	for i := range provs {
+		provStrings[i] = provs[i].String()
 	}
-	return result
+
+	return fmt.Sprintf("{ %s }", strings.Join(provStrings, "; "))
 }
 
 type decoder struct {

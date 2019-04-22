@@ -170,7 +170,7 @@ func TestLoad(t *testing.T) {
 		args              args
 		env               map[string]string
 		wantConfig        interface{}
-		wantProvenance    map[string]string
+		wantProvenances   map[string]string
 		wantIsDefineds    []Key
 		wantNotIsDefineds []Key
 		wantErrIsDefineds []Key
@@ -196,7 +196,7 @@ func TestLoad(t *testing.T) {
 		B1: 123,
 	}
 	tst.wantErr = false
-	tst.wantProvenance = map[string]string{
+	tst.wantProvenances = map[string]string{
 		"A1": "0",
 		"B1": "0",
 	}
@@ -227,7 +227,7 @@ func TestLoad(t *testing.T) {
 		B1: 123,
 	}
 	tst.wantErr = false
-	tst.wantProvenance = map[string]string{
+	tst.wantProvenances = map[string]string{
 		"A1": "0",
 		"B1": "0",
 	}
@@ -261,7 +261,7 @@ func TestLoad(t *testing.T) {
 		"B1": int64(123),
 	}
 	tst.wantErr = false
-	tst.wantProvenance = map[string]string{
+	tst.wantProvenances = map[string]string{
 		"a1": "0",
 		"B1": "0",
 	}
@@ -313,7 +313,7 @@ func TestLoad(t *testing.T) {
 		},
 	}
 	tst.wantErr = false
-	tst.wantProvenance = map[string]string{
+	tst.wantProvenances = map[string]string{
 		"A":        "[absent]",
 		"sect1.A1": "third",
 		"sect1.B1": "second",
@@ -379,7 +379,7 @@ func TestLoad(t *testing.T) {
 		},
 	}
 	tst.wantErr = false
-	tst.wantProvenance = map[string]string{
+	tst.wantProvenances = map[string]string{
 		"A":        "[absent]",
 		"sect1.A1": "third",
 		"sect1.B1": "second",
@@ -455,7 +455,7 @@ func TestLoad(t *testing.T) {
 		},
 	}
 	tst.wantErr = false
-	tst.wantProvenance = map[string]string{
+	tst.wantProvenances = map[string]string{
 		"A":        "[absent]",
 		"sect1.A1": "$S1A1_FROM_ENV",
 		"sect1.B1": "$S1B1_FROM_ENV",
@@ -517,7 +517,7 @@ func TestLoad(t *testing.T) {
 		},
 	}
 	tst.wantErr = false
-	tst.wantProvenance = map[string]string{
+	tst.wantProvenances = map[string]string{
 		"sect1.a1": "first",
 		"sect1.b1": "$S1B1_FROM_ENV",
 		"sect2.a1": "$S2A1_FROM_ENV",
@@ -601,7 +601,7 @@ func TestLoad(t *testing.T) {
 		D: 1.2,
 	}
 	tst.wantErr = false
-	tst.wantProvenance = map[string]string{
+	tst.wantProvenances = map[string]string{
 		"eh":  "[absent]",
 		"bee": "0",
 		"D":   "0",
@@ -635,7 +635,7 @@ func TestLoad(t *testing.T) {
 		D: 1.2,
 	}
 	tst.wantErr = false
-	tst.wantProvenance = map[string]string{
+	tst.wantProvenances = map[string]string{
 		"eh":  "[absent]",
 		"bee": "0",
 		"D":   "0",
@@ -698,7 +698,7 @@ func TestLoad(t *testing.T) {
 		},
 	}
 	tst.wantErr = false
-	tst.wantProvenance = map[string]string{
+	tst.wantProvenances = map[string]string{
 		"A":            "0",
 		"B":            "0",
 		"D":            "0",
@@ -770,7 +770,7 @@ func TestLoad(t *testing.T) {
 		},
 	}
 	tst.wantErr = false
-	tst.wantProvenance = map[string]string{
+	tst.wantProvenances = map[string]string{
 		"A":            "0",
 		"B":            "0",
 		"D":            "0",
@@ -833,7 +833,7 @@ func TestLoad(t *testing.T) {
 		"F": "my text",
 	}
 	tst.wantErr = false
-	tst.wantProvenance = map[string]string{
+	tst.wantProvenances = map[string]string{
 		"A":            "0",
 		"B":            "0",
 		"D":            "0",
@@ -1087,7 +1087,7 @@ func TestLoad(t *testing.T) {
 		D: 1.2,
 	}
 	tst.wantErr = false
-	tst.wantProvenance = map[string]string{
+	tst.wantProvenances = map[string]string{
 		"eh":  "[default]",
 		"bee": "[default]",
 		// C is an ignored field
@@ -1136,7 +1136,7 @@ func TestLoad(t *testing.T) {
 		"D":   1.2,
 	}
 	tst.wantErr = false
-	tst.wantProvenance = map[string]string{
+	tst.wantProvenances = map[string]string{
 		"A":   "[default]",
 		"bee": "[default]",
 		"D":   "0",
@@ -1234,8 +1234,20 @@ func TestLoad(t *testing.T) {
 				t.Fatalf("result did not match;\ngot  %#v\nwant %#v\nmd: %+v", resultComparator, tt.wantConfig, gotMD)
 			}
 
-			if !reflect.DeepEqual(gotMD.Provenance(), tt.wantProvenance) {
-				t.Fatalf("Provenance mismatch;\ngot  %#v\nwant %#v", gotMD.Provenance(), tt.wantProvenance)
+			if len(gotMD.Provenances) != len(tt.wantProvenances) {
+				t.Fatalf("len(gotMD.Provenances) != len(tt.wantProvenances);\ngot:  %#v\nwant: %#v", gotMD.Provenances, tt.wantProvenances)
+			}
+			for key, src := range tt.wantProvenances {
+				found := false
+				for _, prov := range gotMD.Provenances {
+					if prov.Key.String() == key && prov.Src == src {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Fatalf("Provenance mismatch; failed to find %s:%s\ngot:  %#v\nwant: %#v", key, src, gotMD.Provenances, tt.wantProvenances)
+				}
 			}
 
 			for _, k := range tt.wantIsDefineds {
@@ -1565,4 +1577,88 @@ func makeStringReaders(ss []string) []io.Reader {
 		res[i] = strings.NewReader(ss[i])
 	}
 	return res
+}
+
+func TestKey_String(t *testing.T) {
+	tests := []struct {
+		name string
+		k    Key
+		want string
+	}{
+		{
+			name: "simple",
+			k:    Key{"a", "b"},
+			want: "a.b",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.k.String(); got != tt.want {
+				t.Errorf("Key.String() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestProvenance_String(t *testing.T) {
+	tests := []struct {
+		name string
+		prov Provenance
+		want string
+	}{
+		{
+			name: "simple",
+			prov: Provenance{
+				aliasedKey: reflection.AliasedKey{
+					{"a"}, {"b"},
+				},
+				Key: Key{"a", "b"},
+				Src: "thesrc",
+			},
+			want: "'a.b':'thesrc'",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.prov.String(); got != tt.want {
+				t.Errorf("Provenance.String() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestProvenances_String(t *testing.T) {
+	tests := []struct {
+		name  string
+		provs Provenances
+		want  string
+	}{
+		{
+			name: "simple",
+			provs: Provenances{
+				{
+					aliasedKey: reflection.AliasedKey{
+						{"a"}, {"b"},
+					},
+					Key: Key{"a", "b"},
+					Src: "thesrc",
+				},
+				{
+					aliasedKey: reflection.AliasedKey{
+						{"c"}, {"d"},
+					},
+					Key: Key{"c", "d"},
+					Src: "thesrc",
+				},
+			},
+			want: "{ 'a.b':'thesrc'; 'c.d':'thesrc' }",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.provs.String(); got != tt.want {
+				t.Errorf("Provenances.String() = %v, want %v", got, tt.want)
+			}
+		})
+	}
 }
