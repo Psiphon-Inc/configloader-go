@@ -26,9 +26,50 @@ type Codec interface {
 // Guarantee: The struct tag alias will be last.
 type AliasedKeyElem []string
 
+// Equal returns true if the two AliasedKeyElems match.
+func (ake AliasedKeyElem) Equal(cmp AliasedKeyElem) bool {
+	for _, alias1 := range ake {
+		for _, alias2 := range cmp {
+			// Do a case-insensitive comparison, since encoding/json and BurntSushi/toml do
+			if strings.EqualFold(alias1, alias2) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // AliasedKey is a key that can be written multiple ways, all of which should match.
 // Each element may have aliases. None of the elements will be empty.
 type AliasedKey []AliasedKeyElem
+
+// Equal returns true if the two AliasedKeys match.
+func (ak AliasedKey) Equal(cmp AliasedKey) bool {
+	if len(ak) != len(cmp) {
+		return false
+	}
+
+	for i := range ak {
+		akElem := ak[i]
+		cmpElem := cmp[i]
+
+		if !akElem.Equal(cmpElem) {
+			return false
+		}
+
+		// Aliases matched for this element of the key; continue through the elements
+	}
+
+	return true
+}
+
+// HasPrefix returns true if prefix is a prefix of the key.
+func (ak AliasedKey) HasPrefix(prefix AliasedKey) bool {
+	if len(prefix) > len(ak) {
+		return false
+	}
+	return ak[:len(prefix)].Equal(prefix)
+}
 
 // StructField holds information about field in a struct.
 type StructField struct {
@@ -45,6 +86,13 @@ type StructField struct {
 
 	// If the strut tag contains an explicit type, it will be provided here.
 	ExpectedType string
+
+	// Pointer to the parent of the field (for non-roots)
+	Parent *StructField
+	// Pointers to the children of this field (for non-leafs)
+	Children []*StructField
+
+	// NOTE: If any fields are added, make sure to update the compareStructFields test helper.
 }
 
 // decoder holds the tag name and codec used by a call to GetStructFields
@@ -65,24 +113,29 @@ ignored. (I.e., with the `json:` or `toml:` struct tags.)
 
 The returned slice is guaranteed to have branches before leaves.
 */
-func GetStructFields(obj interface{}, tagName string, codec Codec) []StructField {
+func GetStructFields(obj interface{}, tagName string, codec Codec) []*StructField {
 	d := decoder{tagName, codec}
-	return d.getStructFieldsRecursive(reflect.ValueOf(obj), StructField{})
+	return d.getStructFieldsRecursive(reflect.ValueOf(obj), nil)
 }
 
 // Recursion helper for GetStructFields.
-func (d decoder) getStructFieldsRecursive(structValue reflect.Value, currField StructField) []StructField {
+// structValue starts out as the reflect.Value of the initial struct or map, and then gets
+// the value of each field as the struct/map is walked.
+// currField starts out as the zero value. After that it is the field that is being recursed
+// into, since much of the field info (like name) is not available from the Value itself.
+func (d decoder) getStructFieldsRecursive(structValue reflect.Value, currField *StructField) []*StructField {
 	switch structValue.Kind() {
 	case reflect.Ptr:
 		// Unwrap and recurse
 		structValue = structValue.Elem()
 		if structValue.IsValid() {
+			// currField and parent don't change as a result of unwrapping
 			return d.getStructFieldsRecursive(structValue, currField)
 		}
 
 	// If it is a struct we walk each field
 	case reflect.Struct:
-		structFields := make([]StructField, 0)
+		structFields := make([]*StructField, 0)
 		for i := 0; i < structValue.NumField(); i++ {
 			field := structValue.Field(i)
 			fieldType := structValue.Type().Field(i)
@@ -91,27 +144,33 @@ func (d decoder) getStructFieldsRecursive(structValue reflect.Value, currField S
 				continue
 			}
 
+			var keyPrefix AliasedKey
+			if currField != nil {
+				keyPrefix = currField.AliasedKey
+			}
+
 			thisField, recurseValue := d.makeField(
-				currField.AliasedKey,
+				keyPrefix,
 				fieldType.Name,
 				&fieldType.Tag,
-				field)
+				field,
+				currField) // the parent of this new field
 			if thisField == nil {
 				continue
 			}
 
-			structFields = append(structFields, *thisField)
+			structFields = append(structFields, thisField)
 
 			if recurseValue != nil {
 				// Recurse into the field
-				structFields = append(structFields, d.getStructFieldsRecursive(*recurseValue, *thisField)...)
+				structFields = append(structFields, d.getStructFieldsRecursive(*recurseValue, thisField)...)
 			}
 		}
 		return structFields
 
 	// Recurse into maps
 	case reflect.Map:
-		mapFields := make([]StructField, 0)
+		mapFields := make([]*StructField, 0)
 		// We'll collect and sort the keys, mostly to make testing easier later (and
 		// because there won't be so many fields that this is a performance problem).
 		var keys []reflect.Value
@@ -124,26 +183,32 @@ func (d decoder) getStructFieldsRecursive(structValue reflect.Value, currField S
 		for _, key := range keys {
 			fieldValue := structValue.MapIndex(key)
 
+			var keyPrefix AliasedKey
+			if currField != nil {
+				keyPrefix = currField.AliasedKey
+			}
+
 			thisField, recurseValue := d.makeField(
-				currField.AliasedKey,
+				keyPrefix,
 				key.String(),
 				nil,
-				fieldValue)
+				fieldValue,
+				currField) // the parent of this new field
 			if thisField == nil {
 				continue
 			}
 
-			mapFields = append(mapFields, *thisField)
+			mapFields = append(mapFields, thisField)
 
 			if recurseValue != nil {
 				// Recurse into the map value
-				mapFields = append(mapFields, d.getStructFieldsRecursive(*recurseValue, *thisField)...)
+				mapFields = append(mapFields, d.getStructFieldsRecursive(*recurseValue, thisField)...)
 			}
 		}
 		return mapFields
 	}
 
-	return []StructField{}
+	return []*StructField{}
 }
 
 // Derive this once to use for checking implementation of encoding.TextUnmarshaler below.
@@ -154,7 +219,7 @@ var textUnmarshalerType = reflect.TypeOf((*encoding.TextUnmarshaler)(nil)).Elem(
 // Return value recurseValue will be non-nil if the field should be recursed into (such as
 // for maps and structs). recurseValue may be different than v, as unwrapping may have occurred
 // (such as for pointers and interfaces).
-func (d decoder) makeField(keyPrefix AliasedKey, name string, structTag *reflect.StructTag, v reflect.Value,
+func (d decoder) makeField(keyPrefix AliasedKey, name string, structTag *reflect.StructTag, v reflect.Value, parent *StructField,
 ) (
 	sf *StructField, recurseValue *reflect.Value,
 ) {
@@ -168,7 +233,7 @@ func (d decoder) makeField(keyPrefix AliasedKey, name string, structTag *reflect
 		vElem := v.Elem()
 		if vElem.IsValid() {
 			// Recurse on the unwrapped value
-			return d.makeField(keyPrefix, name, structTag, vElem)
+			return d.makeField(keyPrefix, name, structTag, vElem, parent)
 		}
 		// Otherwise it's nil and just fall through
 	}
@@ -199,6 +264,10 @@ func (d decoder) makeField(keyPrefix AliasedKey, name string, structTag *reflect
 
 	sf.Kind = kind.String()
 	sf.Type = v.Type().String()
+	sf.Parent = parent
+	if sf.Parent != nil {
+		sf.Parent.Children = append(sf.Parent.Children, sf)
+	}
 
 	recurseValue = nil
 	if kind == reflect.Struct || kind == reflect.Map {
@@ -217,11 +286,30 @@ func (sf StructField) String() string {
 	sb.WriteString(fmt.Sprintf("\tOptional: %v\n", sf.Optional))
 	sb.WriteString(fmt.Sprintf("\tType: %v\n", sf.Type))
 	sb.WriteString(fmt.Sprintf("\tKind: %v\n", sf.Kind))
+
+	// Comparing example output will choke on the trailing space, so special-case the empty value
 	if sf.ExpectedType != "" {
 		sb.WriteString(fmt.Sprintf("\tExpectedType: %v\n", sf.ExpectedType))
 	} else {
-		sb.WriteString(fmt.Sprintf("\tExpectedType:\n"))
+		sb.WriteString("\tExpectedType:\n")
 	}
+
+	if sf.Parent != nil {
+		sb.WriteString(fmt.Sprintf("\tParent: %v\n", sf.Parent.AliasedKey))
+	} else {
+		sb.WriteString(fmt.Sprintf("\tParent: nil\n"))
+	}
+
+	if len(sf.Children) > 0 {
+		sb.WriteString("\tChildren: {\n")
+		for _, child := range sf.Children {
+			sb.WriteString(fmt.Sprintf("\t\t%v\n", child.AliasedKey))
+		}
+		sb.WriteString("\t}\n")
+	} else {
+		sb.WriteString("\tChildren: {}\n")
+	}
+
 	sb.WriteString("}")
 
 	return sb.String()

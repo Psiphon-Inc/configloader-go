@@ -35,6 +35,8 @@ func ExampleGetStructFields_withStruct() {
 	// 	Type: string
 	// 	Kind: string
 	// 	ExpectedType:
+	// 	Parent: nil
+	// 	Children: {}
 	// }
 	// StructField{
 	// 	AliasedKey: [[Inner]]
@@ -42,6 +44,10 @@ func ExampleGetStructFields_withStruct() {
 	// 	Type: struct { InnerF int }
 	// 	Kind: struct
 	// 	ExpectedType:
+	// 	Parent: nil
+	// 	Children: {
+	// 		[[Inner] [InnerF]]
+	// 	}
 	// }
 	// StructField{
 	// 	AliasedKey: [[Inner] [InnerF]]
@@ -49,6 +55,8 @@ func ExampleGetStructFields_withStruct() {
 	// 	Type: int
 	// 	Kind: int
 	// 	ExpectedType:
+	// 	Parent: [[Inner]]
+	// 	Children: {}
 	// }
 	// StructField{
 	// 	AliasedKey: [[Time]]
@@ -56,6 +64,8 @@ func ExampleGetStructFields_withStruct() {
 	// 	Type: time.Time
 	// 	Kind: struct
 	// 	ExpectedType: string
+	// 	Parent: nil
+	// 	Children: {}
 	// }
 }
 
@@ -85,6 +95,8 @@ func ExampleGetStructFields_withMap() {
 	// 	Type: string
 	// 	Kind: string
 	// 	ExpectedType:
+	// 	Parent: nil
+	// 	Children: {}
 	// }
 	// StructField{
 	// 	AliasedKey: [[b]]
@@ -92,6 +104,8 @@ func ExampleGetStructFields_withMap() {
 	// 	Type: int
 	// 	Kind: int
 	// 	ExpectedType:
+	// 	Parent: nil
+	// 	Children: {}
 	// }
 	// StructField{
 	// 	AliasedKey: [[c]]
@@ -99,6 +113,8 @@ func ExampleGetStructFields_withMap() {
 	// 	Type: time.Time
 	// 	Kind: struct
 	// 	ExpectedType: string
+	// 	Parent: nil
+	// 	Children: {}
 	// }
 	// StructField{
 	// 	AliasedKey: [[d]]
@@ -106,6 +122,10 @@ func ExampleGetStructFields_withMap() {
 	// 	Type: map[string]interface {}
 	// 	Kind: map
 	// 	ExpectedType:
+	// 	Parent: nil
+	// 	Children: {
+	// 		[[d] [d1]]
+	// 	}
 	// }
 	// StructField{
 	// 	AliasedKey: [[d] [d1]]
@@ -113,6 +133,8 @@ func ExampleGetStructFields_withMap() {
 	// 	Type: string
 	// 	Kind: string
 	// 	ExpectedType:
+	// 	Parent: [[d]]
+	// 	Children: {}
 	// }
 	// StructField{
 	// 	AliasedKey: [[e]]
@@ -120,5 +142,7 @@ func ExampleGetStructFields_withMap() {
 	// 	Type: []bool
 	// 	Kind: slice
 	// 	ExpectedType:
+	// 	Parent: nil
+	// 	Children: {}
 	// }
 }

@@ -41,7 +41,7 @@ func (codec codecImplmentation) GetStructFieldAlias(st reflect.StructTag) string
 	return ""
 }
 
-func (codec codecImplmentation) FieldTypesConsistent(check, gold reflection.StructField) (noDeeper bool, err error) {
+func (codec codecImplmentation) FieldTypesConsistent(check, gold *reflection.StructField) (noDeeper bool, err error) {
 	if strings.HasPrefix(check.Kind, "float") && (strings.HasPrefix(gold.Kind, "float") || strings.HasPrefix(gold.Kind, "int")) {
 		return true, nil
 	}

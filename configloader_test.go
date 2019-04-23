@@ -22,7 +22,7 @@ func Test_setMapByKey(t *testing.T) {
 		m            map[string]interface{}
 		k            Key
 		v            interface{}
-		structFields []reflection.StructField
+		structFields []*reflection.StructField
 	}
 	type test struct {
 		name    string
@@ -1211,7 +1211,7 @@ func TestLoad(t *testing.T) {
 	tst.name = "error: bad defaults key"
 	tst.args.codec = toml.Codec
 	tst.args.readers = makeStringReaders([]string{
-		// Not B is absent even though not tagged optional
+		// Note B is absent even though not tagged optional
 		`
 		D = 1.2
 		`,
@@ -1242,6 +1242,46 @@ func TestLoad(t *testing.T) {
 		D: 1.2,
 	}
 	tst.wantErr = true
+	tests = append(tests, tst)
+
+	//----------------------------------------------------------------------
+
+	//----------------------------------------------------------------------
+
+	tst = test{}
+	tst.name = "optional section"
+	tst.args.codec = toml.Codec
+	tst.args.readers = makeStringReaders([]string{
+		`
+		A = "aaaa"
+		[sect1]
+		A1 = "1.a1a1"
+		B1 = 123
+		# [sect2]
+		`,
+	})
+	tst.args.readerNames = nil
+	tst.args.envOverrides = nil
+	tst.args.defaults = nil
+	tst.wantConfig = subStruct{
+		A: "aaaa",
+		S1: simpleStruct{
+			A1: "1.a1a1",
+			B1: 123,
+		},
+		// S2: Zero value
+	}
+	tst.wantErr = false
+	tst.wantProvenances = map[string]string{
+		"A":        "0",
+		"sect1.A1": "0",
+		"sect1.B1": "0",
+		"sect2.A1": "[absent]",
+		"sect2.B1": "[absent]",
+	}
+	tst.wantIsDefineds = []Key{}
+	tst.wantNotIsDefineds = []Key{}
+	tst.wantErrIsDefineds = []Key{}
 	tests = append(tests, tst)
 
 	//----------------------------------------------------------------------
@@ -1400,7 +1440,7 @@ func Test_aliasedKeysMatch(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := aliasedKeysMatch(tt.args.ak1, tt.args.ak2); got != tt.want {
+			if got := tt.args.ak1.Equal(tt.args.ak2); got != tt.want {
 				t.Errorf("aliasedKeysMatch() = %v, want %v", got, tt.want)
 			}
 		})
@@ -1409,7 +1449,7 @@ func Test_aliasedKeysMatch(t *testing.T) {
 
 func Test_findStructField(t *testing.T) {
 	type args struct {
-		fields    []reflection.StructField
+		fields    []*reflection.StructField
 		targetKey reflection.AliasedKey
 	}
 	tests := []struct {
@@ -1423,7 +1463,7 @@ func Test_findStructField(t *testing.T) {
 				targetKey: reflection.AliasedKey{
 					{"a"},
 				},
-				fields: []reflection.StructField{
+				fields: []*reflection.StructField{
 					{
 						AliasedKey: reflection.AliasedKey{
 							{"a"},
@@ -1440,7 +1480,7 @@ func Test_findStructField(t *testing.T) {
 					{"b"},
 					{"bee_two"},
 				},
-				fields: []reflection.StructField{
+				fields: []*reflection.StructField{
 					{
 						AliasedKey: reflection.AliasedKey{
 							{"a"},
@@ -1474,7 +1514,7 @@ func Test_findStructField(t *testing.T) {
 					{"b"},
 					{"nomatch"},
 				},
-				fields: []reflection.StructField{
+				fields: []*reflection.StructField{
 					{
 						AliasedKey: reflection.AliasedKey{
 							{"a"},
@@ -1513,7 +1553,7 @@ func Test_findStructField(t *testing.T) {
 				return
 			}
 
-			if !aliasedKeysMatch(gotStructField.AliasedKey, tt.args.targetKey) {
+			if !gotStructField.AliasedKey.Equal(tt.args.targetKey) {
 				t.Fatalf("gotStructField doesn't actually match target: got %+v; want %+v", gotStructField.AliasedKey, tt.args.targetKey)
 			}
 		})

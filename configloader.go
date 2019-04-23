@@ -14,7 +14,7 @@ import (
 	"github.com/pkg/errors"
 )
 
-// Used in struct tags like `conf:"optional"`. Can be modified if the caller desires.
+// TagName is used in struct tags like `conf:"optional"`. Can be modified if the caller desires.
 var TagName = "conf"
 
 type Codec interface {
@@ -27,7 +27,8 @@ type Codec interface {
 	// For example, encoding.json makes all numbers float64.
 	// noDeeper should be true if the structure should not be checked any deeper.
 	// err must be non-nil if the types are _not_ consistent.
-	FieldTypesConsistent(check, gold reflection.StructField) (noDeeper bool, err error)
+	// check and gold will never be nil.
+	FieldTypesConsistent(check, gold *reflection.StructField) (noDeeper bool, err error)
 }
 
 type Key []string
@@ -63,8 +64,8 @@ type Provenance struct {
 type Provenances []Provenance
 
 type Metadata struct {
-	structFields []reflection.StructField
-	absentFields []reflection.StructField
+	structFields []*reflection.StructField
+	absentFields []*reflection.StructField
 
 	// A map version of the config
 	ConfigMap map[string]interface{}
@@ -127,7 +128,7 @@ func (md *Metadata) setProvenance(k Key, src string) {
 
 	// See if the new provenance is already in the slice (possibly with an alias)
 	for i := range md.Provenances {
-		if aliasedKeysMatch(ak, md.Provenances[i].aliasedKey) {
+		if ak.Equal(md.Provenances[i].aliasedKey) {
 			// Already present; update
 			md.Provenances[i].Src = src
 			return
@@ -346,13 +347,31 @@ func Load(codec Codec, readers []io.Reader, readerNames []string, envOverrides [
 		return md, errors.Wrapf(err, "verifyFieldsConsistency failed for merged map")
 	}
 
-	var missingRequiredFields []reflection.StructField
+	// Set the provenance of absent fields, and detect if any required fields are missing
+	var missingRequiredFields []*reflection.StructField
 	for _, f := range md.absentFields {
+		// We only record provenance for leafs
+		if len(f.Children) == 0 {
+			md.setProvenance(keyFromAliasedKey(f.AliasedKey), "[absent]")
+		}
+
+		// If a branch of the tree (struct or map) is optional and absent, then its
+		// children will not be considered "required". But if that optional branch is
+		// present, then its children must adhere to their own optional status.
+		if f.Optional && len(f.Children) > 0 {
+			// This field is absent, optional, and has children (so it's a branch).
+			// Mark all of its children and grandchildren as optional as well, so they
+			// don't get flagged as "required".
+			// Note that if some children are themselves branches, when they get processed
+			// their children will get marked Optional, and so on.
+			for _, child := range f.Children {
+				child.Optional = true
+			}
+		}
+
 		if !f.Optional {
 			missingRequiredFields = append(missingRequiredFields, f)
 		}
-
-		md.setProvenance(keyFromAliasedKey(f.AliasedKey), "[absent]")
 	}
 	if len(missingRequiredFields) > 0 {
 		return md, errors.Errorf("missing required fields: %+v", missingRequiredFields)
@@ -385,7 +404,7 @@ func Load(codec Codec, readers []io.Reader, readerNames []string, envOverrides [
 	return md, nil
 }
 
-func setMapByKey(m map[string]interface{}, k Key, v interface{}, structFields []reflection.StructField) error {
+func setMapByKey(m map[string]interface{}, k Key, v interface{}, structFields []*reflection.StructField) error {
 	aliasedKey := aliasedKeyFromKey(k)
 
 	// We'll try to find a full aliasedKey from the provided struct fields (if any)
@@ -404,7 +423,7 @@ func setMapByKey(m map[string]interface{}, k Key, v interface{}, structFields []
 		// If the field already exists in the map, use the key/field that's there,
 		// otherwise build the map at keyElem.
 		for currMapKey := range currMap {
-			if aliasedKeyElemsMatch(aliasedKey[i], reflection.AliasedKeyElem{currMapKey}) {
+			if aliasedKey[i].Equal(reflection.AliasedKeyElem{currMapKey}) {
 				keyElem = currMapKey
 				break
 			}
@@ -435,7 +454,7 @@ func setMapByKey(m map[string]interface{}, k Key, v interface{}, structFields []
 
 // Merge src into dst, overwriting values.
 // The keys of the leaves merged are returned.
-func (d decoder) mergeMaps(dst, src map[string]interface{}, structFields []reflection.StructField) (keysMerged []Key) {
+func (d decoder) mergeMaps(dst, src map[string]interface{}, structFields []*reflection.StructField) (keysMerged []Key) {
 	// Get all the fields of the src map
 	srcStructFields := reflection.GetStructFields(src, TagName, d.codec)
 	dstStructFields := reflection.GetStructFields(dst, TagName, d.codec)
@@ -446,7 +465,7 @@ func (d decoder) mergeMaps(dst, src map[string]interface{}, structFields []refle
 			// children. Luckily, the ordering guarantee of structFields is such that
 			// the very next key will be a child, if one exists.
 			// Additionally, we don't want clobber existing maps with empty ones.
-			if (i+1 < len(srcStructFields)) && aliasedKeyPrefixMatch(srcStructFields[i+1].AliasedKey, srcField.AliasedKey) {
+			if (i+1 < len(srcStructFields)) && srcStructFields[i+1].AliasedKey.HasPrefix(srcField.AliasedKey) {
 				// This map is not a leaf, as the next field is a child
 				continue
 			}
@@ -486,9 +505,9 @@ func (d decoder) mergeMaps(dst, src map[string]interface{}, structFields []refle
 // field in the config).
 // 2. The field types match.
 // 3. Absent fields (required or optional). Return this, but don't error on it.
-func (d decoder) verifyFieldsConsistency(check, gold []reflection.StructField) (absentFields []reflection.StructField, err error) {
+func (d decoder) verifyFieldsConsistency(check, gold []*reflection.StructField) (absentFields []*reflection.StructField, err error) {
 	// Start by treating all the gold fields as absent, then remove them as we hit them
-	absentFieldsCandidates := make([]reflection.StructField, len(gold))
+	absentFieldsCandidates := make([]*reflection.StructField, len(gold))
 	copy(absentFieldsCandidates, gold)
 
 	var skipPrefixes []reflection.AliasedKey
@@ -496,7 +515,7 @@ func (d decoder) verifyFieldsConsistency(check, gold []reflection.StructField) (
 CheckFieldsLoop:
 	for _, checkField := range check {
 		for _, skipPrefix := range skipPrefixes {
-			if aliasedKeyPrefixMatch(checkField.AliasedKey, skipPrefix) {
+			if checkField.AliasedKey.HasPrefix(skipPrefix) {
 				continue CheckFieldsLoop
 			}
 		}
@@ -508,13 +527,13 @@ CheckFieldsLoop:
 
 		// Remove goldField from absentFieldsCandidates
 		for i := range absentFieldsCandidates {
-			if aliasedKeysMatch(absentFieldsCandidates[i].AliasedKey, goldField.AliasedKey) {
+			if absentFieldsCandidates[i].AliasedKey.Equal(goldField.AliasedKey) {
 				absentFieldsCandidates = append(absentFieldsCandidates[:i], absentFieldsCandidates[i+1:]...)
 				break
 			}
 		}
 
-		noDeeper, err := d.fieldTypesConsistent(checkField, *goldField)
+		noDeeper, err := d.fieldTypesConsistent(checkField, goldField)
 		if err != nil {
 			return nil, errors.Wrapf(err, "field types not consistent; got %+v, want %+v", checkField, goldField)
 		}
@@ -526,11 +545,11 @@ CheckFieldsLoop:
 
 	// Keys skipped due to skipPrefix do not cound as "absent", so remove any matches
 	// from absentFieldsCandidates that didn't get processed above.
-	absentFields = make([]reflection.StructField, 0)
+	absentFields = make([]*reflection.StructField, 0)
 AbsentSkipLoop:
 	for _, absent := range absentFieldsCandidates {
 		for _, skipPrefix := range skipPrefixes {
-			if aliasedKeyPrefixMatch(absent.AliasedKey, skipPrefix) {
+			if absent.AliasedKey.HasPrefix(skipPrefix) {
 				continue AbsentSkipLoop
 			}
 		}
@@ -542,7 +561,7 @@ AbsentSkipLoop:
 }
 
 // It is assumed that check is from a map and gold is from a struct.
-func (d decoder) fieldTypesConsistent(check, gold reflection.StructField) (noDeeper bool, err error) {
+func (d decoder) fieldTypesConsistent(check, gold *reflection.StructField) (noDeeper bool, err error) {
 	/*
 		Examples:
 		- time.Time implements encoding.TextUnmarshaler, so expectedType will be "string"
@@ -605,53 +624,15 @@ func (d decoder) fieldTypesConsistent(check, gold reflection.StructField) (noDee
 	return false, errors.Errorf("check field type/kind does not match gold type/kind; check:%+v; gold:%+v", check, gold)
 }
 
-func aliasedKeysMatch(ak1, ak2 reflection.AliasedKey) bool {
-	if len(ak1) != len(ak2) {
-		return false
-	}
-
-	for i := range ak1 {
-		ak1Elem := ak1[i]
-		ak2Elem := ak2[i]
-
-		if !aliasedKeyElemsMatch(ak1Elem, ak2Elem) {
-			return false
-		}
-
-		// Aliases matched for this element of the key; continue through the elements
-	}
-
-	return true
-}
-
-func aliasedKeyElemsMatch(elem1, elem2 reflection.AliasedKeyElem) bool {
-	for _, alias1 := range elem1 {
-		for _, alias2 := range elem2 {
-			// Do a case-insensitive comparison, since encoding/json and BurntSushi/toml do
-			if strings.EqualFold(alias1, alias2) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func aliasedKeyPrefixMatch(ak, prefix reflection.AliasedKey) bool {
-	if len(prefix) > len(ak) {
-		return false
-	}
-	return aliasedKeysMatch(ak[:len(prefix)], prefix)
-}
-
-func findStructField(fields []reflection.StructField, targetKey reflection.AliasedKey) (*reflection.StructField, bool) {
+func findStructField(fields []*reflection.StructField, targetKey reflection.AliasedKey) (*reflection.StructField, bool) {
 	for i := range fields {
-		fieldPtr := &fields[i]
+		fieldPtr := fields[i]
 		if len(fieldPtr.AliasedKey) != len(targetKey) {
 			// Can't possibly match
 			continue
 		}
 
-		if aliasedKeysMatch(targetKey, fieldPtr.AliasedKey) {
+		if targetKey.Equal(fieldPtr.AliasedKey) {
 			// We found the field
 			return fieldPtr, true
 		}

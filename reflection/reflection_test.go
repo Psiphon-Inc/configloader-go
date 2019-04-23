@@ -200,6 +200,17 @@ func Test_getStructFields(t *testing.T) {
 					Kind:         "struct",
 					Optional:     false,
 					ExpectedType: "",
+					Children: []*StructField{
+						{
+							AliasedKey: AliasedKey{{"B", "banana_top"}, {"B1"}},
+						},
+						{
+							AliasedKey: AliasedKey{{"B", "banana_top"}, {"B2", "banana2"}},
+						},
+						{
+							AliasedKey: AliasedKey{{"B", "banana_top"}, {"B3", "banana3_top"}},
+						},
+					},
 				},
 				{
 					AliasedKey:   AliasedKey{{"B", "banana_top"}, {"B1"}},
@@ -207,6 +218,7 @@ func Test_getStructFields(t *testing.T) {
 					Kind:         "int",
 					Optional:     false,
 					ExpectedType: "",
+					Parent:       &StructField{AliasedKey: AliasedKey{{"B", "banana_top"}}},
 				},
 				{
 					AliasedKey:   AliasedKey{{"B", "banana_top"}, {"B2", "banana2"}},
@@ -214,6 +226,7 @@ func Test_getStructFields(t *testing.T) {
 					Kind:         "int",
 					Optional:     false,
 					ExpectedType: "",
+					Parent:       &StructField{AliasedKey: AliasedKey{{"B", "banana_top"}}},
 				},
 				{
 					AliasedKey:   AliasedKey{{"B", "banana_top"}, {"B3", "banana3_top"}},
@@ -221,6 +234,12 @@ func Test_getStructFields(t *testing.T) {
 					Kind:         "struct",
 					Optional:     false,
 					ExpectedType: "",
+					Parent:       &StructField{AliasedKey: AliasedKey{{"B", "banana_top"}}},
+					Children: []*StructField{
+						{
+							AliasedKey: AliasedKey{{"B", "banana_top"}, {"B3", "banana3_top"}, {"B31"}},
+						},
+					},
 				},
 				{
 					AliasedKey:   AliasedKey{{"B", "banana_top"}, {"B3", "banana3_top"}, {"B31"}},
@@ -228,6 +247,7 @@ func Test_getStructFields(t *testing.T) {
 					Kind:         "int",
 					Optional:     false,
 					ExpectedType: "",
+					Parent:       &StructField{AliasedKey: AliasedKey{{"B", "banana_top"}, {"B3", "banana3_top"}}},
 				},
 			},
 		},
@@ -280,6 +300,11 @@ func Test_getStructFields(t *testing.T) {
 					Kind:         "struct",
 					Optional:     false,
 					ExpectedType: "",
+					Children: []*StructField{
+						{
+							AliasedKey: AliasedKey{{"E"}, {"TestStructExp"}},
+						},
+					},
 				},
 				{
 					AliasedKey:   AliasedKey{{"E"}, {"TestStructExp"}},
@@ -287,6 +312,7 @@ func Test_getStructFields(t *testing.T) {
 					Kind:         "int",
 					Optional:     false,
 					ExpectedType: "",
+					Parent:       &StructField{AliasedKey: AliasedKey{{"E"}}},
 				},
 				{
 					AliasedKey:   AliasedKey{{"F"}},
@@ -301,6 +327,11 @@ func Test_getStructFields(t *testing.T) {
 					Kind:         "struct",
 					Optional:     false,
 					ExpectedType: "",
+					Children: []*StructField{
+						{
+							AliasedKey: AliasedKey{{"G"}, {"TestStructExp"}},
+						},
+					},
 				},
 				{
 					AliasedKey:   AliasedKey{{"G"}, {"TestStructExp"}},
@@ -308,6 +339,7 @@ func Test_getStructFields(t *testing.T) {
 					Kind:         "int",
 					Optional:     false,
 					ExpectedType: "",
+					Parent:       &StructField{AliasedKey: AliasedKey{{"G"}}},
 				},
 				{
 					AliasedKey:   AliasedKey{{"H"}},
@@ -418,6 +450,11 @@ func Test_getStructFields(t *testing.T) {
 					Kind:         "map",
 					Optional:     false,
 					ExpectedType: "",
+					Children: []*StructField{
+						{
+							AliasedKey: AliasedKey{{"d"}, {"d1"}},
+						},
+					},
 				},
 				{
 					AliasedKey:   AliasedKey{{"d"}, {"d1"}},
@@ -425,6 +462,7 @@ func Test_getStructFields(t *testing.T) {
 					Kind:         "string",
 					Optional:     false,
 					ExpectedType: "",
+					Parent:       &StructField{AliasedKey: AliasedKey{{"d"}}},
 				},
 				{
 					AliasedKey:   AliasedKey{{"e"}},
@@ -452,19 +490,19 @@ func Test_getStructFields(t *testing.T) {
 
 			// The ordering of got vs tt.want is not guaranteed.
 			// Remove from got as we find matches, so we can make sure nothing is missed
-			searchGot := make([]StructField, len(got))
+			searchGot := make([]*StructField, len(got))
 			copy(searchGot, got)
 		WantLoop:
 			for _, w := range tt.want {
 				for i := range searchGot {
-					if reflect.DeepEqual(w, searchGot[i]) {
+					if compareStructFields(w, *searchGot[i]) {
 						searchGot = append(searchGot[:i], searchGot[i+1:]...)
 						continue WantLoop
 					}
 				}
 
 				// Failed to find a match
-				t.Fatalf("want field unmatched in got: %#v;\ngot %#v", w, got)
+				t.Fatalf("want field unmatched in got: %#v;\ngot %v", w, got)
 			}
 
 			if len(searchGot) > 0 {
@@ -472,4 +510,48 @@ func Test_getStructFields(t *testing.T) {
 			}
 		})
 	}
+}
+
+func compareStructFields(got, want StructField) bool {
+	if !got.AliasedKey.Equal(want.AliasedKey) {
+		return false
+	}
+
+	if got.Optional != want.Optional {
+		return false
+	}
+
+	if got.Type != want.Type {
+		return false
+	}
+
+	if got.Kind != want.Kind {
+		return false
+	}
+
+	if got.ExpectedType != want.ExpectedType {
+		return false
+	}
+
+	if (got.Parent != nil) != (want.Parent != nil) {
+		return false
+	}
+
+	// For Parent, we only compare the key
+	if got.Parent != nil && !got.Parent.AliasedKey.Equal(want.Parent.AliasedKey) {
+		return false
+	}
+
+	// For Children, we only compare the keys
+	if len(got.Children) != len(want.Children) {
+		return false
+	}
+
+	for i := range got.Children {
+		if !got.Children[i].AliasedKey.Equal(want.Children[i].AliasedKey) {
+			return false
+		}
+	}
+
+	return true
 }

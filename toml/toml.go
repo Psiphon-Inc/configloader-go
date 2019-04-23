@@ -47,6 +47,6 @@ func (codec codecImplmentation) GetStructFieldAlias(st reflect.StructTag) string
 	return ""
 }
 
-func (codec codecImplmentation) FieldTypesConsistent(check, gold reflection.StructField) (noDeeper bool, err error) {
+func (codec codecImplmentation) FieldTypesConsistent(check, gold *reflection.StructField) (noDeeper bool, err error) {
 	return false, errors.New("toml has no special FieldTypesConsistent checks")
 }
