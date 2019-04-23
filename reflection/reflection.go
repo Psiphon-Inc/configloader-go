@@ -63,7 +63,7 @@ func (ak AliasedKey) Equal(cmp AliasedKey) bool {
 	return true
 }
 
-// HasPrefix returns true if prefix is a prefix of the key.
+// HasPrefix returns true if prefix is a prefix of the key (or equal to it).
 func (ak AliasedKey) HasPrefix(prefix AliasedKey) bool {
 	if len(prefix) > len(ak) {
 		return false

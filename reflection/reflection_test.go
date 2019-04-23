@@ -555,3 +555,126 @@ func compareStructFields(got, want StructField) bool {
 
 	return true
 }
+
+func TestAliasedKeyElem_Equal(t *testing.T) {
+	tests := []struct {
+		name string
+		ake  AliasedKeyElem
+		cmp  AliasedKeyElem
+		want bool
+	}{
+		{
+			name: "one alias, identical",
+			ake:  AliasedKeyElem{"k1"},
+			cmp:  AliasedKeyElem{"k1"},
+			want: true,
+		},
+		{
+			name: "one alias, differ by case",
+			ake:  AliasedKeyElem{"k1"},
+			cmp:  AliasedKeyElem{"K1"},
+			want: true,
+		},
+		{
+			name: "multiple aliases",
+			ake:  AliasedKeyElem{"k1", "alias"},
+			cmp:  AliasedKeyElem{"alias", "K1"},
+			want: true,
+		},
+		{
+			name: "multiple aliases, not all matching",
+			ake:  AliasedKeyElem{"abc", "alias"},
+			cmp:  AliasedKeyElem{"alias", "xyz"},
+			want: true,
+		},
+		{
+			name: "unequal lengths",
+			ake:  AliasedKeyElem{"abc", "alias"},
+			cmp:  AliasedKeyElem{"alias"},
+			want: true,
+		},
+		{
+			name: "no match",
+			ake:  AliasedKeyElem{"abc", "alias"},
+			cmp:  AliasedKeyElem{"xyz", "other"},
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.ake.Equal(tt.cmp); got != tt.want {
+				t.Errorf("AliasedKeyElem.Equal() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAliasedKey_Equal(t *testing.T) {
+	tests := []struct {
+		name string
+		ak   AliasedKey
+		cmp  AliasedKey
+		want bool
+	}{
+		{
+			name: "simple",
+			ak:   AliasedKey{{"k1"}},
+			cmp:  AliasedKey{{"k1"}},
+			want: true,
+		},
+		{
+			name: "longer",
+			ak:   AliasedKey{{"k1"}, {"k2", "alias2"}, {"k3"}, {"abc", "ALIAS4"}},
+			cmp:  AliasedKey{{"k1"}, {"k2"}, {"alias3", "k3"}, {"alias4", "xyz"}},
+			want: true,
+		},
+		{
+			name: "no match",
+			ak:   AliasedKey{{"k1"}, {"k2", "alias2"}, {"NOMATCH"}, {"abc", "ALIAS4"}},
+			cmp:  AliasedKey{{"k1"}, {"k2"}, {"alias3", "k3"}, {"alias4", "xyz"}},
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.ak.Equal(tt.cmp); got != tt.want {
+				t.Errorf("AliasedKey.Equal() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAliasedKey_HasPrefix(t *testing.T) {
+	tests := []struct {
+		name   string
+		ak     AliasedKey
+		prefix AliasedKey
+		want   bool
+	}{
+		{
+			name:   "identical",
+			ak:     AliasedKey{{"k1"}},
+			prefix: AliasedKey{{"k1"}},
+			want:   true,
+		},
+		{
+			name:   "longer",
+			ak:     AliasedKey{{"k1"}, {"k2", "alias2"}, {"k3"}, {"abc", "ALIAS4"}},
+			prefix: AliasedKey{{"K1"}, {"K2"}},
+			want:   true,
+		},
+		{
+			name:   "no match",
+			ak:     AliasedKey{{"k1"}, {"k2", "alias2"}, {"NOMATCH"}, {"abc", "ALIAS4"}},
+			prefix: AliasedKey{{"k1"}, {"k2"}, {"alias3", "k3"}},
+			want:   false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.ak.HasPrefix(tt.prefix); got != tt.want {
+				t.Errorf("AliasedKey.HasPrefix() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
