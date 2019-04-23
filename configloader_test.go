@@ -157,6 +157,10 @@ func TestLoad(t *testing.T) {
 	type hardTypeStruct struct {
 		F float64 `conf:",float32"` // BurntSushi/toml will never give us float32, so this should never match
 	}
+	type subMapStruct struct {
+		A string                 `toml:"apple"`
+		M map[string]interface{} `toml:"maple"`
+	}
 
 	type args struct {
 		codec        Codec
@@ -1246,8 +1250,6 @@ func TestLoad(t *testing.T) {
 
 	//----------------------------------------------------------------------
 
-	//----------------------------------------------------------------------
-
 	tst = test{}
 	tst.name = "optional section"
 	tst.args.codec = toml.Codec
@@ -1278,6 +1280,52 @@ func TestLoad(t *testing.T) {
 		"sect1.B1": "0",
 		"sect2.A1": "[absent]",
 		"sect2.B1": "[absent]",
+	}
+	tst.wantIsDefineds = []Key{}
+	tst.wantNotIsDefineds = []Key{}
+	tst.wantErrIsDefineds = []Key{}
+	tests = append(tests, tst)
+
+	//----------------------------------------------------------------------
+
+	tst = test{}
+	tst.name = "struct with sub-map"
+	tst.args.codec = toml.Codec
+	tst.args.readers = makeStringReaders([]string{
+		`
+		apple = "aaaa"
+		[maple]
+		k1 = "v1"
+		k2 = 22
+		k3 = false
+		arr = ["one", "two", "three"]
+		[maple.sub]
+		subk1 = "subk1value"
+		`,
+	})
+	tst.args.readerNames = nil
+	tst.args.envOverrides = nil
+	tst.args.defaults = nil
+	tst.wantConfig = subMapStruct{
+		A: "aaaa",
+		M: map[string]interface{}{
+			"k1":  "v1",
+			"k2":  int64(22),
+			"k3":  false,
+			"arr": []interface{}{"one", "two", "three"},
+			"sub": map[string]interface{}{
+				"subk1": "subk1value",
+			},
+		},
+	}
+	tst.wantErr = false
+	tst.wantProvenances = map[string]string{
+		"apple":           "0",
+		"maple.k1":        "0",
+		"maple.k2":        "0",
+		"maple.k3":        "0",
+		"maple.arr":       "0",
+		"maple.sub.subk1": "0",
 	}
 	tst.wantIsDefineds = []Key{}
 	tst.wantNotIsDefineds = []Key{}

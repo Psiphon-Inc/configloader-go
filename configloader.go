@@ -502,9 +502,9 @@ func (d decoder) mergeMaps(dst, src map[string]interface{}, structFields []*refl
 
 // Checks three things:
 // 1. There's nothing in check that's not in gold (because that indicates a vestigial
-// field in the config).
+//    field in the config).
 // 2. The field types match.
-// 3. Absent fields (required or optional). Return this, but don't error on it.
+// 3. Absent fields (both required and optional). Return this, but don't error on it.
 func (d decoder) verifyFieldsConsistency(check, gold []*reflection.StructField) (absentFields []*reflection.StructField, err error) {
 	// Start by treating all the gold fields as absent, then remove them as we hit them
 	absentFieldsCandidates := make([]*reflection.StructField, len(gold))
@@ -560,7 +560,10 @@ AbsentSkipLoop:
 	return absentFields, nil
 }
 
+// Check if the field types in check are consistent with those in gold.
 // It is assumed that check is from a map and gold is from a struct.
+// If noDeeper is true on return, the caller should not recurse any deeper into this
+// field's structure.
 func (d decoder) fieldTypesConsistent(check, gold *reflection.StructField) (noDeeper bool, err error) {
 	/*
 		Examples:
@@ -580,32 +583,37 @@ func (d decoder) fieldTypesConsistent(check, gold *reflection.StructField) (noDe
 		return true, nil
 	}
 
+	if gold.Kind == "map" {
+		// We won't have any structure to compare any deeper, so...
+		noDeeper = true
+	}
+
 	// Exact match
 	if check.Type == gold.Type || check.Type == gold.Kind {
-		return false, nil
+		return noDeeper, nil
 	}
 
 	// E.g., if there's a "*string" in the gold and a "string" in the check, that's fine
 	if gold.Type == "*"+check.Type {
-		return false, nil
+		return noDeeper, nil
 	}
 
 	if gold.Kind == "struct" && check.Kind == "map" {
-		return false, nil
+		return noDeeper, nil
 	}
 
 	// We'll treat different int sizes as equivalent.
 	// If values are too big for specified types, an error will occur
 	// when unmarshalling.
 	if strings.HasPrefix(gold.Kind, "int") && strings.HasPrefix(check.Kind, "int") {
-		return false, nil
+		return noDeeper, nil
 	}
 
 	// We'll treat different float sizes as equivalent.
 	// If values are too big for specified types, an error will occur
 	// when unmarshalling.
 	if strings.HasPrefix(gold.Kind, "float") && strings.HasPrefix(check.Kind, "float") {
-		return false, nil
+		return noDeeper, nil
 	}
 
 	// We don't check types inside a slice.
