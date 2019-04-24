@@ -1,4 +1,10 @@
-package configloader
+/*
+ * BSD 3-Clause License
+ * Copyright (c) 2019, Psiphon Inc.
+ * All rights reserved.
+ */
+
+ package configloader
 
 import (
 	"encoding"

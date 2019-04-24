@@ -1,3 +1,9 @@
+/*
+ * BSD 3-Clause License
+ * Copyright (c) 2019, Psiphon Inc.
+ * All rights reserved.
+ */
+
 // Package json provides JSON Codec methods for use with configloader.
 package json
 
