@@ -407,10 +407,20 @@ func Load(codec Codec, readers []io.Reader, readerNames []string, envOverrides [
 func setMapByKey(m map[string]interface{}, k Key, v interface{}, structFields []*reflection.StructField) error {
 	aliasedKey := aliasedKeyFromKey(k)
 
-	// We'll try to find a full aliasedKey from the provided struct fields (if any)
-	sf, ok := findStructField(structFields, aliasedKeyFromKey(k))
-	if ok {
-		aliasedKey = sf.AliasedKey
+	// We'll try to find an AliasedKey from the provided struct fields (if any). If we
+	// can't find a full match, we'll look for prefixes, as we might be settings a
+	// map-within-a-struct, that only has struct fields up to a certain point, and that
+	// we still want to match.
+	keyPrefix := k
+	for len(keyPrefix) > 0 {
+		if sf, ok := findStructField(structFields, aliasedKeyFromKey(keyPrefix)); ok {
+			// Found a match. Combine this prefix with the rest of the original key.
+			aliasedKey = append(sf.AliasedKey, aliasedKey[len(sf.AliasedKey):]...)
+			break
+		}
+
+		// Didn't find it; try the next shorter prefix
+		keyPrefix = keyPrefix[:len(keyPrefix)-1]
 	}
 
 	currMap := m

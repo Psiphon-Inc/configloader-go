@@ -3,9 +3,15 @@
 import subprocess
 import time
 
-res = subprocess.run(['go', 'test', './...'], capture_output=True)
-if res != 0:
-  print(res.stdout.decode('utf-8'), flush=True)
-  print(res.stderr.decode('utf-8'), flush=True)
-  time.sleep(1) # Cheap hack to allow the output to flush
-  res.check_returncode()
+tests = [
+  'go test ./...',
+  'go vet ./...',
+]
+
+for test in tests:
+  res = subprocess.run(shlex.split(test), capture_output=True)
+  if res != 0:
+    print(res.stdout.decode('utf-8'), flush=True)
+    print(res.stderr.decode('utf-8'), flush=True)
+    time.sleep(1) # Cheap hack to allow the output to flush
+    res.check_returncode()

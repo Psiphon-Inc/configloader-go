@@ -27,28 +27,23 @@ func Test_setMapByKey(t *testing.T) {
 	type test struct {
 		name    string
 		args    args
+		wantMap map[string]interface{}
 		wantErr bool
 	}
 	tests := make([]test, 0)
-
-	checker := func(args args) bool {
-		m := args.m
-		for i := range args.k {
-			if i == len(args.k)-1 {
-				// Last key element
-				return m[args.k[i]] == args.v
-			}
-			// If this panics, things are horribly wrong
-			m = m[args.k[i]].(map[string]interface{})
-		}
-		return false
-	}
 
 	tst := test{}
 	tst.name = "simple"
 	tst.args.m = map[string]interface{}{}
 	tst.args.k = Key{"a", "b", "c"}
 	tst.args.v = "val"
+	tst.wantMap = map[string]interface{}{
+		"a": map[string]interface{}{
+			"b": map[string]interface{}{
+				"c": "val",
+			},
+		},
+	}
 	tst.wantErr = false
 	tests = append(tests, tst)
 
@@ -63,6 +58,11 @@ func Test_setMapByKey(t *testing.T) {
 	}
 	tst.args.k = Key{"a", "b"}
 	tst.args.v = "val"
+	tst.wantMap = map[string]interface{}{
+		"a": map[string]interface{}{
+			"b": "val",
+		},
+	}
 	tst.wantErr = false
 	tests = append(tests, tst)
 
@@ -75,6 +75,11 @@ func Test_setMapByKey(t *testing.T) {
 	}
 	tst.args.k = Key{"a", "b"}
 	tst.args.v = "val"
+	tst.wantMap = map[string]interface{}{
+		"a": map[string]interface{}{
+			"b": "val",
+		},
+	}
 	tst.wantErr = false
 	tests = append(tests, tst)
 
@@ -92,6 +97,47 @@ func Test_setMapByKey(t *testing.T) {
 
 	//-----------------------------------------------------------------------
 
+	tst = test{}
+	tst.name = "matching alias"
+	tst.args.m = map[string]interface{}{
+		"a": nil,
+	}
+	tst.args.k = Key{"apple", "b"}
+	tst.args.v = "val"
+	tst.args.structFields = []*reflection.StructField{
+		{AliasedKey: reflection.AliasedKey{{"A", "apple"}}},
+		{AliasedKey: reflection.AliasedKey{{"A", "apple"}, {"B", "banana"}}},
+	}
+	tst.wantMap = map[string]interface{}{
+		"a": map[string]interface{}{
+			"banana": "val",
+		},
+	}
+	tst.wantErr = false
+	tests = append(tests, tst)
+
+	//-----------------------------------------------------------------------
+
+	tst = test{}
+	tst.name = "matching alias prefix"
+	tst.args.m = map[string]interface{}{
+		"a": nil,
+	}
+	tst.args.k = Key{"apple", "b"}
+	tst.args.v = "val"
+	tst.args.structFields = []*reflection.StructField{
+		{AliasedKey: reflection.AliasedKey{{"A", "apple"}}},
+	}
+	tst.wantMap = map[string]interface{}{
+		"a": map[string]interface{}{
+			"b": "val",
+		},
+	}
+	tst.wantErr = false
+	tests = append(tests, tst)
+
+	//-----------------------------------------------------------------------
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := setMapByKey(tt.args.m, tt.args.k, tt.args.v, tt.args.structFields)
@@ -103,8 +149,8 @@ func Test_setMapByKey(t *testing.T) {
 				return
 			}
 
-			if !checker(tt.args) {
-				t.Fatalf("value not set properly; v=%#v; m=%#v", tt.args.v, tt.args.m)
+			if !reflect.DeepEqual(tt.args.m, tt.wantMap) {
+				t.Fatalf("maps don't match\ngot:  %#v\nwant: %#v", tt.args.m, tt.wantMap)
 			}
 		})
 	}
