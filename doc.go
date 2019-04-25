@@ -15,7 +15,7 @@ The value to be populated can be a struct or a map[string]interface{}. A struct 
 
 Struct Field Tags
 
-Field name aliases can be specified using type-specific tags, like `toml:"alias"` or `json:"alias"`. Fields can be ignored using type-specific tags well: `toml:"-"`, `json:"-"`.
+Field name aliases can be specified using type-specific tags, like `toml:"alias"` or `json:"alias"`. Fields can be ignored using type-specific tags as well, like `toml:"-"` or `json:"-"`.
 
 configloader also provides its own tag type, of the form `conf:"optional,specific_type"`, described below. The name "conf" is configurable with the TagName variable.
 
