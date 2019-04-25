@@ -63,15 +63,17 @@ defaults := []configloader.Default{
   },
 }
 
+var config Config
+
 metadata, err := configloader.Load(
   toml.Codec, // Specifies config file format
   configReaders, configReaderNames,
-  envVarOverrides,
   defaults,
-  &conf.nonsecret)
+  envVarOverrides,
+  &config)
 
 // Record the config info. May help diagnose problems later.
-log.Print(metadata.ConfigMap) // or (Config)
+log.Print(metadata.ConfigMap) // or log.Print(config)
 log.Print(metadata.Provenances)
 ```
 
