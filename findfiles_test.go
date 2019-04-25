@@ -55,6 +55,17 @@ func TestFindConfigFiles(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "empty path, path in filename",
+			args: args{
+				filenames:   []string{"testdata/file1"},
+				searchPaths: []string{""},
+			},
+			wantReaderNames: []string{
+				"testdata/file1",
+			},
+			wantErr: false,
+		},
+		{
 			name: "one file, alternate path (hits first, nonexistent second dir)",
 			args: args{
 				filenames:   []string{"file1"},

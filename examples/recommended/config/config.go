@@ -74,8 +74,8 @@ func New() (*Config, error) {
 	conf.nonsecretMD, err = configloader.Load(
 		toml.Codec, // Specifies config file format
 		nonsecretReaders, nonsecretReaderNames,
-		nil, // No env var overrides
 		defaults,
+		nil, // No env var overrides
 		&conf.nonsecret)
 	if err != nil {
 		return nil, errors.Wrap(err, "configloader.Load failed for non-secret config")
@@ -108,8 +108,8 @@ func New() (*Config, error) {
 	conf.secretMD, err = configloader.Load(
 		toml.Codec,
 		secretReaders, secretReaderNames,
-		envOverrides,
 		nil, // No defaults
+		envOverrides,
 		&conf.secret)
 	if err != nil {
 		return nil, errors.Wrap(err, "configloader.Load failed for secret config")

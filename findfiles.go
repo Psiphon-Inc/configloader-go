@@ -14,18 +14,31 @@ import (
 	"github.com/pkg/errors"
 )
 
-// Assigning to a variable to assist with testing (can force errors)
+// Assigning to a variable to assist with testing (to force errors)
 var osOpen = os.Open
 
-// TODO: Comment
+// FindConfigFiles assists with figuring out which config files should be used.
+//
 // filenames are the names of the files that will contribute to this config. All files will
 // be used, and each will be merged on top of the previous ones. The first filename must
 // exist, but subsequent names are optional. The intention is that the first file is the
 // primary config, and the other files optionally override that.
+//
 // searchPaths is the set of paths where the config files will be looked for, in order.
 // When the file is found, the search will stop. If this is set to {""}, the filenames
 // will be used unmodified. (So, absolute paths could be set in filenames and they will be
 // used directly.)
+//
+// The returned readers and readerNames are intended to be passed directly to configloader.Load().
+// The closers should be closed after Load() is called, perhaps like this:
+//  defer func() {
+//    for i := range closers {
+//      closers[i].Close()
+//    }
+//  }()
+// The reason the closers are separate from the readers (instead of []io.ReadClosers) is
+// both to ease passing into Load() and to help ensure the closing happens (via and
+// "unused variable" compile error).
 func FindConfigFiles(filenames, searchPaths []string) (readers []io.Reader, closers []io.Closer, readerNames []string, err error) {
 	if len(filenames) == 0 {
 		err = errors.Errorf("no filenames provided")

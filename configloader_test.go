@@ -4,7 +4,7 @@
  * All rights reserved.
  */
 
- package configloader
+package configloader
 
 import (
 	"encoding"
@@ -253,8 +253,8 @@ func TestLoad(t *testing.T) {
 	}
 	tst.wantErr = false
 	tst.wantProvenances = map[string]string{
-		"A1": "0",
-		"B1": "0",
+		"A1": "[0]",
+		"B1": "[0]",
 	}
 	tst.wantIsDefineds = []Key{
 		{"a1"},
@@ -284,8 +284,8 @@ func TestLoad(t *testing.T) {
 	}
 	tst.wantErr = false
 	tst.wantProvenances = map[string]string{
-		"A1": "0",
-		"B1": "0",
+		"A1": "[0]",
+		"B1": "[0]",
 	}
 	tst.wantIsDefineds = []Key{
 		{"a1"},
@@ -318,8 +318,8 @@ func TestLoad(t *testing.T) {
 	}
 	tst.wantErr = false
 	tst.wantProvenances = map[string]string{
-		"a1": "0",
-		"B1": "0",
+		"a1": "[0]",
+		"B1": "[0]",
 	}
 	tst.wantIsDefineds = []Key{
 		{"a1"},
@@ -479,9 +479,8 @@ func TestLoad(t *testing.T) {
 		{
 			EnvVar: "S1B1_FROM_ENV",
 			Key:    Key{"sect1", "b1"},
-			Conv: func(v string) interface{} {
-				i, _ := strconv.Atoi(v)
-				return i
+			Conv: func(v string) (interface{}, error) {
+				return strconv.Atoi(v)
 			},
 		},
 		{
@@ -542,9 +541,8 @@ func TestLoad(t *testing.T) {
 		{
 			EnvVar: "S1B1_FROM_ENV",
 			Key:    Key{"sect1", "b1"},
-			Conv: func(v string) interface{} {
-				i, _ := strconv.ParseInt(v, 10, 64)
-				return i
+			Conv: func(v string) (interface{}, error) {
+				return strconv.ParseInt(v, 10, 64)
 			},
 		},
 		{
@@ -659,8 +657,8 @@ func TestLoad(t *testing.T) {
 	tst.wantErr = false
 	tst.wantProvenances = map[string]string{
 		"eh":  "[absent]",
-		"bee": "0",
-		"D":   "0",
+		"bee": "[0]",
+		"D":   "[0]",
 	}
 	tst.wantIsDefineds = []Key{
 		{"bee"}, {"b"}, {"B"},
@@ -693,8 +691,8 @@ func TestLoad(t *testing.T) {
 	tst.wantErr = false
 	tst.wantProvenances = map[string]string{
 		"eh":  "[absent]",
-		"bee": "0",
-		"D":   "0",
+		"bee": "[0]",
+		"D":   "[0]",
 	}
 	tst.wantIsDefineds = []Key{
 		{"bee"}, {"b"}, {"B"},
@@ -755,13 +753,13 @@ func TestLoad(t *testing.T) {
 	}
 	tst.wantErr = false
 	tst.wantProvenances = map[string]string{
-		"A":            "0",
-		"B":            "0",
-		"D":            "0",
-		"E":            "0",
-		"F":            "0",
-		"cee_three.A1": "0",
-		"cee_three.B1": "0",
+		"A":            "[0]",
+		"B":            "[0]",
+		"D":            "[0]",
+		"E":            "[0]",
+		"F":            "[0]",
+		"cee_three.A1": "[0]",
+		"cee_three.B1": "[0]",
 	}
 	tst.wantIsDefineds = []Key{
 		{"C", "A1"},
@@ -827,13 +825,13 @@ func TestLoad(t *testing.T) {
 	}
 	tst.wantErr = false
 	tst.wantProvenances = map[string]string{
-		"A":            "0",
-		"B":            "0",
-		"D":            "0",
-		"E":            "0",
-		"F":            "0",
-		"cee_three.A1": "0",
-		"cee_three.B1": "0",
+		"A":            "[0]",
+		"B":            "[0]",
+		"D":            "[0]",
+		"E":            "[0]",
+		"F":            "[0]",
+		"cee_three.A1": "[0]",
+		"cee_three.B1": "[0]",
 	}
 	tst.wantIsDefineds = []Key{
 		{"C", "A1"},
@@ -890,13 +888,13 @@ func TestLoad(t *testing.T) {
 	}
 	tst.wantErr = false
 	tst.wantProvenances = map[string]string{
-		"A":            "0",
-		"B":            "0",
-		"D":            "0",
-		"E":            "0",
-		"F":            "0",
-		"cee_three.a1": "0",
-		"cee_three.b1": "0",
+		"A":            "[0]",
+		"B":            "[0]",
+		"D":            "[0]",
+		"E":            "[0]",
+		"F":            "[0]",
+		"cee_three.a1": "[0]",
+		"cee_three.b1": "[0]",
 	}
 	tst.wantIsDefineds = []Key{
 		{"cee_three", "a1"},
@@ -909,7 +907,6 @@ func TestLoad(t *testing.T) {
 	//----------------------------------------------------------------------
 
 	tst = test{}
-	// BurntSushi/toml will fill the struct with zero values and give no error
 	type structWithString struct {
 		F string
 	}
@@ -1026,9 +1023,8 @@ func TestLoad(t *testing.T) {
 		{
 			EnvVar: "S1B1_FROM_ENV",
 			Key:    Key{"sect1", "b1"},
-			Conv: func(v string) interface{} {
-				i, _ := strconv.Atoi(v)
-				return i
+			Conv: func(v string) (interface{}, error) {
+				return strconv.Atoi(v)
 			},
 		},
 		{
@@ -1065,9 +1061,8 @@ func TestLoad(t *testing.T) {
 		{
 			EnvVar: "S1B1_FROM_ENV",
 			Key:    Key{"sect1", "b1"},
-			Conv: func(v string) interface{} {
-				i, _ := strconv.Atoi(v)
-				return i
+			Conv: func(v string) (interface{}, error) {
+				return strconv.Atoi(v)
 			},
 		},
 		{
@@ -1079,6 +1074,38 @@ func TestLoad(t *testing.T) {
 	tst.env = map[string]string{
 		"S1B1_FROM_ENV": "333333",
 		"BAD_KEY":       "erroneous",
+	}
+	tst.wantConfig = subStruct{}
+	tst.wantErr = true
+	tests = append(tests, tst)
+
+	//----------------------------------------------------------------------
+
+	tst = test{}
+	tst.name = "error: env override with coversion failure"
+	tst.args.codec = toml.Codec
+	tst.args.readers = makeStringReaders([]string{
+		`
+		[sect1]
+		a1 = "s1.a1 from file"
+		b1 = 111
+		[sect2]
+		a1 = "s2.a1 from file"
+		b1 = 222
+		`,
+	})
+	tst.args.readerNames = []string{"first"}
+	tst.args.envOverrides = []EnvOverride{
+		{
+			EnvVar: "S1B1_FROM_ENV",
+			Key:    Key{"sect1", "b1"},
+			Conv: func(v string) (interface{}, error) {
+				return strconv.Atoi(v)
+			},
+		},
+	}
+	tst.env = map[string]string{
+		"S1B1_FROM_ENV": "THIS ISN'T AN INTEGER",
 	}
 	tst.wantConfig = subStruct{}
 	tst.wantErr = true
@@ -1147,7 +1174,7 @@ func TestLoad(t *testing.T) {
 		"eh":  "[default]",
 		"bee": "[default]",
 		// C is an ignored field
-		"D": "0",
+		"D": "[0]",
 	}
 	tst.wantIsDefineds = []Key{
 		{"A"}, {"a"}, {"eh"},
@@ -1195,7 +1222,7 @@ func TestLoad(t *testing.T) {
 	tst.wantProvenances = map[string]string{
 		"A":   "[default]",
 		"bee": "[default]",
-		"D":   "0",
+		"D":   "[0]",
 	}
 	tst.wantIsDefineds = []Key{
 		{"A"},
@@ -1250,11 +1277,11 @@ func TestLoad(t *testing.T) {
 	}
 	tst.wantErr = false
 	tst.wantProvenances = map[string]string{
-		"A":        "0",
+		"A":        "[0]",
 		"sect1.A1": "[default]",
 		"sect1.B1": "[default]",
-		"sect2.A1": "0",
-		"sect2.B1": "0",
+		"sect2.A1": "[0]",
+		"sect2.B1": "[0]",
 	}
 	tst.wantIsDefineds = []Key{}
 	tst.wantNotIsDefineds = []Key{}
@@ -1327,14 +1354,17 @@ func TestLoad(t *testing.T) {
 	}
 	tst.wantErr = false
 	tst.wantProvenances = map[string]string{
-		"A":        "0",
-		"sect1.A1": "0",
-		"sect1.B1": "0",
+		"A":        "[0]",
+		"sect1.A1": "[0]",
+		"sect1.B1": "[0]",
 		"sect2.A1": "[absent]",
 		"sect2.B1": "[absent]",
 	}
 	tst.wantIsDefineds = []Key{}
-	tst.wantNotIsDefineds = []Key{}
+	tst.wantNotIsDefineds = []Key{
+		Key{"S2"},
+		Key{"S2", "A1"},
+	}
 	tst.wantErrIsDefineds = []Key{}
 	tests = append(tests, tst)
 
@@ -1372,12 +1402,12 @@ func TestLoad(t *testing.T) {
 	}
 	tst.wantErr = false
 	tst.wantProvenances = map[string]string{
-		"apple":           "0",
-		"maple.k1":        "0",
-		"maple.k2":        "0",
-		"maple.k3":        "0",
-		"maple.arr":       "0",
-		"maple.sub.subk1": "0",
+		"apple":           "[0]",
+		"maple.k1":        "[0]",
+		"maple.k2":        "[0]",
+		"maple.k3":        "[0]",
+		"maple.arr":       "[0]",
+		"maple.sub.subk1": "[0]",
 	}
 	tst.wantIsDefineds = []Key{}
 	tst.wantNotIsDefineds = []Key{}
@@ -1396,7 +1426,7 @@ func TestLoad(t *testing.T) {
 			// Create an instance of the result based on the type of wantConfig
 			resultPtr := reflect.New(reflect.TypeOf(tt.wantConfig)).Interface()
 
-			gotMD, err := Load(tt.args.codec, tt.args.readers, tt.args.readerNames, tt.args.envOverrides, tt.args.defaults, resultPtr)
+			gotMD, err := Load(tt.args.codec, tt.args.readers, tt.args.readerNames, tt.args.defaults, tt.args.envOverrides, resultPtr)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("Load() error = %v; wantErr: %v", err, tt.wantErr)
 			}
@@ -1717,9 +1747,9 @@ func TestLoad_Special(t *testing.T) {
 			t.Fatalf("Non-empty map result didn't match want;\ngot:  %#v\nwant: %#v", result, want)
 		}
 		compareProvenances(t, md.Provenances, map[string]string{
-			"a.b": "0",
+			"a.b": "[0]",
 			//"a.c": "[absent]", // Doesn't end up in provenances at all
-			"a.d": "0",
+			"a.d": "[0]",
 		})
 		if !reflect.DeepEqual(md.ConfigMap, want) {
 			t.Fatalf("md.ConfigMap didn't match;\ngot:  %#v\nwant: %#v", md.ConfigMap, want)
@@ -1757,7 +1787,7 @@ func TestLoad_Special(t *testing.T) {
 		}
 		compareProvenances(t, md.Provenances, map[string]string{
 			"A": "[absent]",
-			"B": "0",
+			"B": "[0]",
 		})
 		wantConfigMap := map[string]interface{}{
 			"A": "pre-filled",

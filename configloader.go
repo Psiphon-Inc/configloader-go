@@ -4,7 +4,7 @@
  * All rights reserved.
  */
 
- package configloader
+package configloader
 
 import (
 	"fmt"
@@ -13,7 +13,6 @@ import (
 	"os"
 	"reflect"
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/Psiphon-Inc/configloader-go/reflection"
@@ -23,6 +22,8 @@ import (
 // TagName is used in struct tags like `conf:"optional"`. Can be modified if the caller desires.
 var TagName = "conf"
 
+// Codec is the interface that specific config file language support must implement.
+// See the json and toml packages for examples.
 type Codec interface {
 	reflection.Codec
 
@@ -37,51 +38,92 @@ type Codec interface {
 	FieldTypesConsistent(check, gold *reflection.StructField) (noDeeper bool, err error)
 }
 
+// Key is a field path into a struct or map. For most cases it can contain the field names
+// used in the result struct, or the aliases used in the config file.
+// A struct path key might look like Key{"Stats", "SampleCount"}.
+// A config alias key might look like Key{"stats", "sample_count"}.
 type Key []string
 
 // Convert k to a string appropriate for keying a map (so, unique and consistent).
 func (k Key) String() string {
+	// NOTE: If we support a config language that uses "." in keys, we'll have to make
+	// this more robust/careful/complicated.
 	return strings.Join(k, ".")
 }
 
-// MarshalText implements encoding.TextMarshaler. To be used with logging (especially of Provenances).
+// MarshalText implements encoding.TextMarshaler. To be used with JSON logging (especially of Provenances).
 func (k Key) MarshalText() (text []byte, err error) {
 	return []byte(k.String()), nil
 }
 
+// EnvOverride indicates that a field should be overridden by an environment variable
+// value, if it exists.
 type EnvOverride struct {
+	// The environment variable. Case-sensitive.
 	EnvVar string
-	Key    Key
-	Conv   func(envString string) interface{}
+
+	// The key of the field that should be overridden.
+	Key Key
+
+	// A function to convert from the string obtained from the environment to the type
+	// required by the field. For example:
+	//   func(v string) interface{} {
+	// 	   return strconv.Atoi(v)
+	//   }
+	Conv func(envString string) (interface{}, error)
 }
 
+// Default is used to provide a default value for a field if it is otherwise absent.
 type Default struct {
+	// The key of the field that will start with the default value.
 	Key Key
+
+	// The value the field should be given if it doesn't receive any other value.
 	Val interface{}
 }
 
+// Provenance indicates the source that the value of a field ultimately came from.
 type Provenance struct {
 	// We store aliasedKey as well as Key for the purposes of accessing and printing by caller
 	aliasedKey reflection.AliasedKey
-	Key        Key
-	Src        string
+
+	// The key of the field this is the provenance for.
+	Key Key
+
+	// The source of the value of the field. It can be one of the following:
+	//   "path/to/file.toml": If the value came from a file and readerNames was provided to Load()
+	//   "[0]": If the value came from a file and readerNames was not provided to Load()
+	//   "[default]": If the field received the default value passed to Load()
+	//   "[absent]": If the field was not set at all
+	//   "$ENV_VAR_NAME": If the field value came from an environment variable override
+	Src string
 }
 
+// Provenances provides the sources (provenances) for all of the fields in the resulting
+// struct or map.
+// It is good practice to log this value for later debugging help.
 type Provenances []Provenance
 
+// Metadata contains information about the loaded config.
 type Metadata struct {
 	structFields []*reflection.StructField
 	absentFields []*reflection.StructField
 
-	// A map version of the config
+	// A map version of the resulting config.
+	// It is good practice to log either this map or the config struct for later debugging help,
+	// BUT ONLY IF THEY DON'T CONTAIN SECRETS.
+	// (If the result is already a map, this is identical.)
 	ConfigMap map[string]interface{}
 
-	// The source for each config field
+	// The sources of each config field.
+	// It is good practice to log either this map or the config struct for later debugging help.
 	Provenances Provenances
 }
 
-// TODO: Comment
-// - for maps, never returns error
+// IsDefined checks if the given key was defined in the loaded struct (including from
+// defaults or environment variable overrides).
+// Error is returned if the key is not valid for the result struct. (So error is never
+// returned if the result is a map.)
 func (md *Metadata) IsDefined(key ...string) (bool, error) {
 	aliasedKey := aliasedKeyFromKey(key)
 
@@ -124,6 +166,7 @@ func (md *Metadata) IsDefined(key ...string) (bool, error) {
 	return false, errors.Errorf("key does not exist among known fields: %+v", md.structFields)
 }
 
+// Add or overwrite the provenance src for the given key
 func (md *Metadata) setProvenance(k Key, src string) {
 	ak := aliasedKeyFromKey(k)
 
@@ -150,10 +193,12 @@ func (md *Metadata) setProvenance(k Key, src string) {
 	md.Provenances = append(md.Provenances, prov)
 }
 
+// String converts the provenance to a string. Useful for debugging, logging, or examples.
 func (prov Provenance) String() string {
 	return fmt.Sprintf("'%s':'%s'", prov.Key, prov.Src)
 }
 
+// String converts the provenances to a string. Useful for debugging, logging, or examples.
 func (provs Provenances) String() string {
 	// We want to print sorted by Key, so do that first
 	sort.Slice(provs, func(i, j int) bool { return provs[i].Key.String() < provs[j].Key.String() })
@@ -166,19 +211,46 @@ func (provs Provenances) String() string {
 	return fmt.Sprintf("{ %s }", strings.Join(provStrings, "; "))
 }
 
+// decoder captures the variables shared between many calls.
+// This is mostly an effort to clean up the number of params of many helpers, and the
+// ugliness of passing codec through helpers that don't actually use it directly to get it
+// deeper helpers that do.
 type decoder struct {
 	codec Codec
 }
 
-// readers will be used to populate the config. Later readers in the slice will take precedence and clobber the earlier.
-// envOverrides is a mapping from environment variable key to config key path (config.DB.Password is Key{"DB", "Password"}).
-// defaults is a set of default values for keys.
-// Each of those envvars will result in overriding a key's value in the resulting struct.
-// absentKeys can be used to determine if defaults should be applied (as zero values might be valid and
-// not indicate absence).
-// result may be struct or map
-func Load(codec Codec, readers []io.Reader, readerNames []string, envOverrides []EnvOverride, defaults []Default, result interface{},
-) (md Metadata, err error) {
+// Load gathers config data from readers, defaults, and environment overrides, and
+// populates result with the values. It provides log-able provenance information for each
+// field in the metadata.
+//
+// codec implements config-file-type-specific helpers. It's possible to use a custom
+// implementation, but you probably want to use one of the configloader-go sub-packages (like json or toml).
+//
+// readers will be used to populate the config. Later readers in the slice will take
+// precedence and values from them will clobber the earlier.
+//
+// readerNames contains useful names for the readers. This is intended to be the filenames
+// obtained from FindConfigFiles(). This is partly a human-readable convenience for
+// provenances and partly essential to know exactly which files were used (as
+// FindConfigFiles look across multiple search paths).
+//
+// defaults will be used to populate the result before any other sources.
+//
+// envOverrides is a mapping from environment variable name to config key path. These are
+// applied after all other sources.
+//
+// result may be struct or map[string]interface{}.
+//
+// Some of the reasons an error may be returned:
+//   - A required field is absent
+//   - A field was found in the config sources that is not present in the result struct
+//   - The type of a value in the config sources didn't match the expected type in the result struct
+//   - One of the readers couldn't be read
+//   - Some other codec unmarshaling problem
+func Load(codec Codec, readers []io.Reader, readerNames []string, defaults []Default, envOverrides []EnvOverride, result interface{},
+) (
+	md Metadata, err error,
+) {
 	decoder := decoder{codec}
 
 	if readerNames != nil && len(readerNames) != len(readers) {
@@ -249,7 +321,7 @@ func Load(codec Codec, readers []io.Reader, readerNames []string, envOverrides [
 
 	// Get the config (file) data from the readers
 	for i, r := range readers {
-		readerName := strconv.Itoa(i)
+		readerName := fmt.Sprintf("[%d]", i)
 		if len(readerNames) > i {
 			readerName = readerNames[i]
 		}
@@ -307,7 +379,9 @@ func Load(codec Codec, readers []io.Reader, readerNames []string, envOverrides [
 		// If the caller provided a type converter, apply it now
 		var valI interface{} = valStr
 		if eo.Conv != nil {
-			valI = eo.Conv(valStr)
+			if valI, err = eo.Conv(valStr); err != nil {
+				return md, errors.Wrapf(err, "conversion of env var string failed for envOverride: %+v", eo)
+			}
 		}
 
 		if err := setMapByKey(envMap, eo.Key, valI, md.structFields); err != nil {
