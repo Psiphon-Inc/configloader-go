@@ -179,11 +179,7 @@ func (d decoder) getStructFieldsRecursive(structValue reflect.Value, currField *
 		mapFields := make([]*StructField, 0)
 		// We'll collect and sort the keys, mostly to make testing easier later (and
 		// because there won't be so many fields that this is a performance problem).
-		var keys []reflect.Value
-		for _, key := range structValue.MapKeys() {
-			keys = append(keys, key)
-		}
-
+		keys := structValue.MapKeys()
 		sort.Slice(keys, func(i, j int) bool { return keys[i].String() < keys[j].String() })
 
 		for _, key := range keys {
