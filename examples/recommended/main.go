@@ -31,6 +31,6 @@ func main() {
 	api.Init(config)
 
 	// DEBUG
-	fmt.Printf("%+v\n", config.Map())
-	fmt.Printf("%+v\n", config.Provenances())
+	fmt.Printf("Config: %+v\n", config.Map())
+	fmt.Printf("Provenances: %+v\n", config.Provenances())
 }

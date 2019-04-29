@@ -36,9 +36,9 @@ type Config struct {
 	secretMD    configloader.Metadata
 }
 
-func New() (*Config, error) {
-	var conf Config
+var conf Config
 
+func Init() error {
 	//
 	// Load non-secret config
 	//
@@ -50,7 +50,7 @@ func New() (*Config, error) {
 
 	nonsecretReaders, nonsecretClosers, nonsecretReaderNames, err := configloader.FindConfigFiles(filenames, searchPaths)
 	if err != nil {
-		return nil, errors.Wrap(err, "FindConfigFiles failed for non-secret files")
+		return errors.Wrap(err, "FindConfigFiles failed for non-secret files")
 	}
 
 	defer func() {
@@ -77,7 +77,7 @@ func New() (*Config, error) {
 		nil, // No env var overrides
 		&conf.nonsecret)
 	if err != nil {
-		return nil, errors.Wrap(err, "configloader.Load failed for non-secret config")
+		return errors.Wrap(err, "configloader.Load failed for non-secret config")
 	}
 
 	//
@@ -88,7 +88,7 @@ func New() (*Config, error) {
 
 	secretReaders, secretClosers, secretReaderNames, err := configloader.FindConfigFiles(filenames, searchPaths)
 	if err != nil {
-		return nil, errors.Wrap(err, "FindConfigFiles failed for secret files")
+		return errors.Wrap(err, "FindConfigFiles failed for secret files")
 	}
 
 	defer func() {
@@ -111,7 +111,7 @@ func New() (*Config, error) {
 		envOverrides,
 		&conf.secret)
 	if err != nil {
-		return nil, errors.Wrap(err, "configloader.Load failed for secret config")
+		return errors.Wrap(err, "configloader.Load failed for secret config")
 	}
 
 	//
@@ -124,41 +124,38 @@ func New() (*Config, error) {
 		conf.nonsecret.CORS.appUserAgentsSet[ua] = true
 	}
 
-	// If there are defaults that are dependent on the values of other fields, they can
-	// be set here.
-
-	return &conf, nil
+	return nil
 }
 
-type Provenances struct {
+type ConfigProvenances struct {
 	Nonsecret configloader.Provenances
 	Secret    configloader.Provenances
 }
 
-func (c *Config) Provenances() Provenances {
-	return Provenances{
-		Nonsecret: c.nonsecretMD.Provenances,
-		Secret:    c.secretMD.Provenances,
+func Provenances() ConfigProvenances {
+	return ConfigProvenances{
+		Nonsecret: conf.nonsecretMD.Provenances,
+		Secret:    conf.secretMD.Provenances,
 	}
 }
 
-func (c *Config) Map() map[string]interface{} {
+func Map() map[string]interface{} {
 	// Don't provide secret values
-	return c.nonsecretMD.ConfigMap
+	return conf.nonsecretMD.ConfigMap
 }
 
-func (c *Config) LogLevel() string {
-	return c.nonsecret.Log.Level
+func LogLevel() string {
+	return conf.nonsecret.Log.Level
 }
 
-func (c *Config) CORSUserAgentAllowed(ua string) bool {
-	return c.nonsecret.CORS.appUserAgentsSet[ua]
+func CORSUserAgentAllowed(ua string) bool {
+	return conf.nonsecret.CORS.appUserAgentsSet[ua]
 }
 
-func (c *Config) StatsSampleCount() int {
-	return c.nonsecret.Stats.SampleCount
+func StatsSampleCount() int {
+	return conf.nonsecret.Stats.SampleCount
 }
 
-func (c *Config) DBPassword() string {
-	return c.secret.DB.Password
+func DBPassword() string {
+	return conf.secret.DB.Password
 }
