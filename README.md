@@ -1,4 +1,4 @@
-[![GoDoc](https://godoc.org/github.com/Psiphon-Inc/configloader-go?status.svg)](https://godoc.org/github.com/Psiphon-Inc/configloader-go)
+[![](https://img.shields.io/github/release/Psiphon-Inc/configloader-go.svg)](https://github.com/Psiphon-Inc/configloader-go/releases/latest) [![GoDoc](https://godoc.org/github.com/Psiphon-Inc/configloader-go?status.svg)](https://godoc.org/github.com/Psiphon-Inc/configloader-go) [![Actions Status](https://wdp9fww0r9.execute-api.us-west-2.amazonaws.com/production/badge/Psiphon-Inc/configloader-go)](https://wdp9fww0r9.execute-api.us-west-2.amazonaws.com/production/results/Psiphon-Inc/configloader-go)
 
 # configloader-go
 
