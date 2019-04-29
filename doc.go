@@ -25,11 +25,13 @@ All fields in a result struct are by default required. A field can be marked as 
 
 Defaults
 
-The best way to provide default values is via the defaults argument to Load. This defaults are implicitly considered optional fields.
+Default values for otherwise absent fields can be passed to Load(). Default values are only applied if the field receives no value from either the config files (readers) or an environment variable.
 
-Default values are only applied the field receives no value from either the config files (readers) or an environment variable.
+Fields with defaults provided in this manner are implicitly considered optional fields.
 
-Another way to provide defaults is to pre-populate the struct or map result. Yet another is way is by after loading, then checking metadata.IsDefined() for the fields in question and assigning default values to them (or returning default values from accessors).
+If a default value depends on the the values of other fields, then it should be flagged as optional via the struct tag, loaded from config, then checked with metadata.IsDefined() to see if it was set (in a file or environment override), and populated appropriately if it wasn't.
+
+It is possible but not recommended to provide defaults by pre-populating the struct or map result. It's also possible but not recommended to check metadata.IsDefined() in accessors and return a default if not defined. Both of these approaches will result in the provenance being "[absent]" rather than "[default]".
 
 Specify Field Type
 
