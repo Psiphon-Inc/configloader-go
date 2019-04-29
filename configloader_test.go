@@ -201,11 +201,6 @@ func TestLoad(t *testing.T) {
 		E time.Time
 		F textUnmarshalType
 	}
-	type comboStruct struct {
-		Simple simpleStruct
-		Tag    tagStruct
-		Adv    advancedTypesStruct
-	}
 	type hardTypeStruct struct {
 		F float64 `conf:",float32"` // BurntSushi/toml will never give us float32, so this should never match
 	}
