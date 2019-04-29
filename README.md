@@ -1,3 +1,5 @@
+[![GoDoc](https://godoc.org/github.com/Psiphon-Inc/configloader-go?status.svg)](https://godoc.org/github.com/Psiphon-Inc/configloader-go)
+
 # configloader-go
 
 `configloader` is a Go library for loading config from multiple files (like `config.toml` and `config_override.toml`), with defaults and environment variable overrides. It provides the following features:
@@ -8,6 +10,8 @@
 * Environment variable field overriding.
 * Additional expected-type checking, with detailed error messages. (Although this is of limited value over the checking in encoding/json and BurntSushi/toml).
 * No more dependencies than you need.
+
+See the [GoDoc documentation](https://godoc.org/github.com/Psiphon-Inc/configloader-go).
 
 ## Why not [Viper](https://github.com/spf13/viper)?
 
