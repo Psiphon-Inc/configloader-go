@@ -83,17 +83,13 @@ log.Print(metadata.Provenances)
 
 ## Future work
 
-* More examples:
-  - Singleton config
-  - Map config
-
 * Type checking inside slices (and better slice handling generally)
 
 * HCL (or HCL2) support. Note that we'll either need better top-level slice support, or
   specify a limitation of no-top-level slices (which are easy to get with HCL).
 
 * Re-evaluate whether the type checking is worthwhile at all or if it should just be left
-  to the unmarshaler.
+  to the unmarshaler. (https://github.com/Psiphon-Inc/configloader-go/issues/1)
 
 ## License
 
