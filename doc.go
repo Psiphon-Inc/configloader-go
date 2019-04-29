@@ -29,7 +29,7 @@ The best way to provide default values is via the defaults argument to Load. Thi
 
 Default values are only applied the field receives no value from either the config files (readers) or an environment variable.
 
-Another way to provide defaults is to pre-populate the struct or map result. Yet another is way is by after loading, then checking metadata.IsDefined() fohttps://asl19.org/en/blog/2014-03-17-ama-psiphon.htmlr the fields in question and assigning default values to them (or returning default values from accessors).
+Another way to provide defaults is to pre-populate the struct or map result. Yet another is way is by after loading, then checking metadata.IsDefined() for the fields in question and assigning default values to them (or returning default values from accessors).
 
 Specify Field Type
 
