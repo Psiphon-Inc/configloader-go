@@ -17,17 +17,25 @@ import (
 // Assigning to a variable to assist with testing (to force errors)
 var osOpen = os.Open
 
-// FindConfigFiles assists with figuring out which config files should be used.
+// FileLocation is the name of a (potential) config file, and the places where it should
+// be looked for.
+type FileLocation struct {
+	// The filename will be searched for relative to each of the search paths. If one of
+	// the search paths is "", then Filename will also be searched for as an absolute path.
+	Filename string
+
+	// The file will be search for through the SearchPaths. These are in order -- the
+	// search will stop on the first match.
+	SearchPaths []string
+}
+
+// FindFiles assists with figuring out which config files should be used.
 //
-// filenames are the names of the files that will contribute to this config. All files will
-// be used, and each will be merged on top of the previous ones. The first filename must
-// exist, but subsequent names are optional. The intention is that the first file is the
-// primary config, and the other files optionally override that.
-//
-// searchPaths is the set of paths where the config files will be looked for, in order.
-// When the file is found, the search will stop. If this is set to {""}, the filenames
-// will be used unmodified. (So, absolute paths could be set in filenames and they will be
-// used directly.)
+// fileLocations is the location info for the files that will contribute to this config.
+// All files will be used, and each will be merged on top of the previous ones. The first
+// file must exist (in at least one of the search paths), but subsequent files are
+// optional. The intention is that the first file is the primary config, and the other
+// files optionally override that.
 //
 // The returned readers and readerNames are intended to be passed directly to configloader.Load().
 // The closers should be closed after Load() is called, perhaps like this:
@@ -39,14 +47,9 @@ var osOpen = os.Open
 // The reason the closers are separate from the readers (instead of []io.ReadClosers) is
 // both to ease passing into Load() and to help ensure the closing happens (via and
 // "unused variable" compile error).
-func FindConfigFiles(filenames, searchPaths []string) (readers []io.Reader, closers []io.Closer, readerNames []string, err error) {
-	if len(filenames) == 0 {
+func FindFiles(fileLocations ...FileLocation) (readers []io.Reader, closers []io.Closer, readerNames []string, err error) {
+	if len(fileLocations) == 0 {
 		err = errors.Errorf("no filenames provided")
-		return nil, nil, nil, err
-	}
-
-	if len(searchPaths) == 0 {
-		err = errors.Errorf("no searchPaths provided")
 		return nil, nil, nil, err
 	}
 
@@ -60,9 +63,9 @@ func FindConfigFiles(filenames, searchPaths []string) (readers []io.Reader, clos
 	}()
 
 FilenamesLoop:
-	for i, fname := range filenames {
-		for _, path := range searchPaths {
-			fpath := filepath.Join(path, fname)
+	for i, loc := range fileLocations {
+		for _, path := range loc.SearchPaths {
+			fpath := filepath.Join(path, loc.Filename)
 			var f *os.File
 			f, err := osOpen(fpath)
 			if os.IsNotExist(err) {
@@ -81,7 +84,7 @@ FilenamesLoop:
 		// We failed to find the file in the search paths. This is only an error if this
 		// is the first filename in filenames (i.e., not an override).
 		if i == 0 {
-			err = errors.Errorf("failed to find file '%v' in search paths: %+v", fname, searchPaths)
+			err = errors.Errorf("failed to find file '%v' in search paths: %+v", loc.Filename, loc.SearchPaths)
 			return nil, nil, nil, err
 		}
 	}

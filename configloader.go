@@ -230,9 +230,9 @@ type decoder struct {
 // precedence and values from them will clobber the earlier.
 //
 // readerNames contains useful names for the readers. This is intended to be the filenames
-// obtained from FindConfigFiles(). This is partly a human-readable convenience for
-// provenances and partly essential to know exactly which files were used (as
-// FindConfigFiles look across multiple search paths).
+// obtained from FindFiles(). This is partly a human-readable convenience for provenances
+// and partly essential to know exactly which files were used (as FindFiles look across
+// multiple search paths).
 //
 // defaults will be used to populate the result before any other sources.
 //

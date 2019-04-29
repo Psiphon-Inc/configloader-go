@@ -9,11 +9,20 @@ import (
 
 func main() {
 	// The first file must exist, but none of the others.
-	filenames := []string{"config.toml", "config_override.toml"}
-	// The search paths are in order of preference.
-	searchPaths := []string{"."}
+	fileLocations := []configloader.FileLocation{
+		{
+			Filename: "config.toml",
+			// The search paths are in order of preference.
+			SearchPaths: []string{".", "/etc/config"},
+		},
+		{
+			Filename: "config_override.toml",
+			// Don't look elsewhere for an override
+			SearchPaths: []string{"."},
+		},
+	}
 
-	readers, closers, readerNames, err := configloader.FindConfigFiles(filenames, searchPaths)
+	readers, closers, readerNames, err := configloader.FindFiles(fileLocations...)
 	if err != nil {
 		panic(fmt.Sprintf("Failed to find config files: %v", err))
 	}

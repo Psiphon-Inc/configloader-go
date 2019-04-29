@@ -44,13 +44,22 @@ func New() (*Config, error) {
 	//
 
 	// The first file must exist, but none of the others.
-	filenames := []string{"config_nonsecret.toml", "config_nonsecret_override.toml"}
-	// The search paths are in order of preference.
-	searchPaths := []string{".", "/etc/config"}
+	fileLocations := []configloader.FileLocation{
+		{
+			Filename: "config_nonsecret.toml",
+			// The search paths are in order of preference.
+			SearchPaths: []string{".", "/etc/config"},
+		},
+		{
+			Filename: "config_nonsecret_override.toml",
+			// Don't look elsewhere for an override
+			SearchPaths: []string{"."},
+		},
+	}
 
-	nonsecretReaders, nonsecretClosers, nonsecretReaderNames, err := configloader.FindConfigFiles(filenames, searchPaths)
+	nonsecretReaders, nonsecretClosers, nonsecretReaderNames, err := configloader.FindFiles(fileLocations...)
 	if err != nil {
-		return nil, errors.Wrap(err, "FindConfigFiles failed for non-secret files")
+		return nil, errors.Wrap(err, "configloader.FindFiles failed for non-secret files")
 	}
 
 	defer func() {
@@ -84,11 +93,20 @@ func New() (*Config, error) {
 	// Load secret config
 	//
 
-	filenames = []string{"config_secret.toml", "config_secret_override.toml"}
+	fileLocations = []configloader.FileLocation{
+		{
+			Filename:    "config_secret.toml",
+			SearchPaths: []string{".", "/etc/config"},
+		},
+		{
+			Filename:    "config_override.toml",
+			SearchPaths: []string{"."},
+		},
+	}
 
-	secretReaders, secretClosers, secretReaderNames, err := configloader.FindConfigFiles(filenames, searchPaths)
+	secretReaders, secretClosers, secretReaderNames, err := configloader.FindFiles(fileLocations...)
 	if err != nil {
-		return nil, errors.Wrap(err, "FindConfigFiles failed for secret files")
+		return nil, errors.Wrap(err, "FindFiles failed for secret files")
 	}
 
 	defer func() {
