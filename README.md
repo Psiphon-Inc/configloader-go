@@ -1,5 +1,7 @@
 [![](https://img.shields.io/github/release/Psiphon-Inc/configloader-go.svg)](https://github.com/Psiphon-Inc/configloader-go/releases/latest) [![GoDoc](https://godoc.org/github.com/Psiphon-Inc/configloader-go?status.svg)](https://godoc.org/github.com/Psiphon-Inc/configloader-go) [![Actions Status](https://wdp9fww0r9.execute-api.us-west-2.amazonaws.com/production/badge/Psiphon-Inc/configloader-go)](https://wdp9fww0r9.execute-api.us-west-2.amazonaws.com/production/results/Psiphon-Inc/configloader-go)
 
+<a href='https://github.com/jpoles1/gopherbadger' target='_blank'>![gopherbadger-tag-do-not-edit](https://img.shields.io/badge/Coverage-95%25-brightgreen.svg?longCache=true&style=flat)</a>
+
 # configloader-go
 
 `configloader` is a Go library for loading config from multiple files (like `config.toml` and `config_override.toml`), with defaults and environment variable overrides. It provides the following features:

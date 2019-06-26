@@ -208,6 +208,9 @@ func TestLoad(t *testing.T) {
 		A string                 `toml:"apple"`
 		M map[string]interface{} `toml:"maple"`
 	}
+	type structWithTypedMap struct {
+		M map[string]int
+	}
 
 	type args struct {
 		codec        Codec
@@ -1403,6 +1406,38 @@ func TestLoad(t *testing.T) {
 		"maple.k3":        "[0]",
 		"maple.arr":       "[0]",
 		"maple.sub.subk1": "[0]",
+	}
+	tst.wantIsDefineds = []Key{}
+	tst.wantNotIsDefineds = []Key{}
+	tst.wantErrIsDefineds = []Key{}
+	tests = append(tests, tst)
+
+	//----------------------------------------------------------------------
+
+	// Test fix for https://github.com/Psiphon-Inc/configloader-go/issues/2
+	tst = test{}
+	tst.name = "struct with typed map"
+	tst.args.codec = toml.Codec
+	tst.args.readers = makeStringReaders([]string{
+		`
+		[M]
+		a = 1
+		b = 2
+		`,
+	})
+	tst.args.readerNames = nil
+	tst.args.envOverrides = nil
+	tst.args.defaults = nil
+	tst.wantConfig = structWithTypedMap{
+		M: map[string]int{
+			"a": 1,
+			"b": 2,
+		},
+	}
+	tst.wantErr = false
+	tst.wantProvenances = map[string]string{
+		"M.a": "[0]",
+		"M.b": "[0]",
 	}
 	tst.wantIsDefineds = []Key{}
 	tst.wantNotIsDefineds = []Key{}

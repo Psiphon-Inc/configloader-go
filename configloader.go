@@ -692,6 +692,13 @@ func (d decoder) fieldTypesConsistent(check, gold *reflection.StructField) (noDe
 		return noDeeper, nil
 	}
 
+	if gold.Kind == "map" && check.Type == "map[string]interface {}" {
+		// If there's a concrete-type map (like map[string]int) in the gold, it will end
+		// up being map[string]interface{} in the check, so we have to be loose with the
+		// comparison.
+		return noDeeper, nil
+	}
+
 	// We'll treat different int sizes as equivalent.
 	// If values are too big for specified types, an error will occur
 	// when unmarshalling.

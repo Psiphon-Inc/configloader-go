@@ -1,7 +1,8 @@
-#!/bin/env python
+#!/bin/env python3
 
 import subprocess
 import time
+import shlex
 
 tests = [
   'go test ./...',
