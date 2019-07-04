@@ -128,39 +128,30 @@ func (md *Metadata) IsDefined(key ...string) (bool, error) {
 	aliasedKey := aliasedKeyFromKey(key)
 
 	// If the key is among the absent fields, then it's not defined.
-	if _, ok := findStructField(md.absentFields, aliasedKey); ok {
+	if _, exact := findStructField(md.absentFields, aliasedKey); exact {
 		return false, nil
 	}
 
-	// If it's not absent and it is in the struct, then it is defined.
-	if _, ok := findStructField(md.structFields, aliasedKey); ok {
-		return true, nil
-	}
+	if len(md.structFields) > 0 {
+		// Result was a struct
+		sf, exact := findStructField(md.structFields, aliasedKey)
 
-	// If the result was a map rather than a struct, then we don't have structFields
-	// or absentFields and we'll have to look in the map that was produced.
-	if len(md.structFields) == 0 {
-		currMap := md.ConfigMap
-		for i := range key {
-			if _, ok := currMap[key[i]]; !ok {
-				return false, nil
-			}
-
-			// The key is in this level of the map.
-			// If this is the last key elem, then we don't need to dig into the map
-			// any deeper, otherwise we do.
-			if i < len(key)-1 {
-				var ok bool
-				currMap, ok = currMap[key[i]].(map[string]interface{})
-				if !ok {
-					// Not a map, so can't dig deeper
-					return false, nil
-				}
+		// If it's not absent and it is in the struct, then it is defined.
+		if exact {
+			return true, nil
+		} else if sf != nil {
+			// The field could still be present if there's a map within the struct
+			if mapFieldExists(aliasedKey, reflect.ValueOf(md.ConfigMap)) {
+				return true, nil
 			}
 		}
+	} else {
+		// Result was a map
+		if mapFieldExists(aliasedKey, reflect.ValueOf(md.ConfigMap)) {
+			return true, nil
+		}
 
-		// We found all the pieces of the key in the map
-		return true, nil
+		return false, nil
 	}
 
 	return false, errors.Errorf("key does not exist among known fields: %+v", md.structFields)
@@ -171,7 +162,7 @@ func (md *Metadata) setProvenance(k Key, src string) {
 	ak := aliasedKeyFromKey(k)
 
 	// Try to find the full aliased key
-	if sf, ok := findStructField(md.structFields, ak); ok {
+	if sf, exact := findStructField(md.structFields, ak); exact {
 		ak = sf.AliasedKey
 	}
 
@@ -284,16 +275,24 @@ func Load(codec Codec, readers []io.Reader, readerNames []string, defaults []Def
 	for _, dflt := range defaults {
 		// If we're setting into a struct (vs a map), make sure the key is valid
 		if !resultIsMap {
-			sf, ok := findStructField(md.structFields, aliasedKeyFromKey(dflt.Key))
-			if !ok {
+			sf, exact := findStructField(md.structFields, aliasedKeyFromKey(dflt.Key))
+			if sf == nil {
 				return md, errors.Errorf("defaults key not found in struct: %+v", dflt)
 			}
 
-			// Because a default was supplied, assume this field is optional
-			sf.Optional = true
+			if exact {
+				// Because a default was supplied, assume this field is optional
+				sf.Optional = true
 
-			// Convert the key into one that prefers aliases
-			dflt.Key = keyFromAliasedKey(sf.AliasedKey)
+				// Convert the key into one that prefers aliases
+				dflt.Key = keyFromAliasedKey(sf.AliasedKey)
+			} else {
+				// The match was only a prefix and not exact; we don't modify anything
+				if sf.Kind != "map" && sf.Kind != "*map" {
+					// Prefix was not a map; so this can't be legit
+					return md, errors.Errorf("defaults key not found in struct: %+v", dflt)
+				}
+			}
 		}
 
 		if err := setMapByKey(defaultsMap, dflt.Key, dflt.Val, md.structFields); err != nil {
@@ -312,7 +311,7 @@ func Load(codec Codec, readers []io.Reader, readerNames []string, defaults []Def
 		}
 	}
 
-	// Merge the env map into the accum map (contributor updating happened above)
+	// Merge the defaults map into the accum map (contributor updating happened above)
 	decoder.mergeMaps(accumConfigMap, defaultsMap, md.structFields)
 
 	//
@@ -362,13 +361,21 @@ func Load(codec Codec, readers []io.Reader, readerNames []string, defaults []Def
 	for _, eo := range envOverrides {
 		// If we're setting into a struct (vs a map), make sure the key is valid
 		if !resultIsMap {
-			sf, ok := findStructField(md.structFields, aliasedKeyFromKey(eo.Key))
-			if !ok {
+			sf, exact := findStructField(md.structFields, aliasedKeyFromKey(eo.Key))
+			if sf == nil {
 				return md, errors.Errorf("envOverride key not found in struct: %+v", eo)
 			}
 
-			// Convert the key into one that prefers aliases
-			eo.Key = keyFromAliasedKey(sf.AliasedKey)
+			if exact {
+				// Convert the key into one that prefers aliases
+				eo.Key = keyFromAliasedKey(sf.AliasedKey)
+			} else {
+				// The match was only a prefix and not exact; we don't modify anything
+				if sf.Kind != "map" && sf.Kind != "*map" {
+					// Prefix was not a map; so this can't be legit
+					return md, errors.Errorf("envOverride key not found in struct: %+v", eo)
+				}
+			}
 		}
 
 		valStr, ok := os.LookupEnv(eo.EnvVar)
@@ -491,16 +498,10 @@ func setMapByKey(m map[string]interface{}, k Key, v interface{}, structFields []
 	// can't find a full match, we'll look for prefixes, as we might be settings a
 	// map-within-a-struct, that only has struct fields up to a certain point, and that
 	// we still want to match.
-	keyPrefix := k
-	for len(keyPrefix) > 0 {
-		if sf, ok := findStructField(structFields, aliasedKeyFromKey(keyPrefix)); ok {
-			// Found a match. Combine this prefix with the rest of the original key.
-			aliasedKey = append(sf.AliasedKey, aliasedKey[len(sf.AliasedKey):]...)
-			break
-		}
-
-		// Didn't find it; try the next shorter prefix
-		keyPrefix = keyPrefix[:len(keyPrefix)-1]
+	if sf, _ := findStructField(structFields, aliasedKey); sf != nil {
+		// Found a match. May be a prefix.
+		// Combine this prefix with the rest of the original key.
+		aliasedKey = append(sf.AliasedKey, aliasedKey[len(sf.AliasedKey):]...)
 	}
 
 	currMap := m
@@ -560,7 +561,7 @@ func (d decoder) mergeMaps(dst, src map[string]interface{}, structFields []*refl
 				continue
 			}
 
-			if _, existsInDst := findStructField(dstStructFields, srcField.AliasedKey); existsInDst {
+			if _, exact := findStructField(dstStructFields, srcField.AliasedKey); exact {
 				// This map (or at least a field at this key) already exists in dst.
 				// We won't clobber it.
 				continue
@@ -610,8 +611,8 @@ CheckFieldsLoop:
 			}
 		}
 
-		goldField, ok := findStructField(gold, checkField.AliasedKey)
-		if !ok {
+		goldField, exact := findStructField(gold, checkField.AliasedKey)
+		if !exact {
 			return nil, errors.Errorf("field in config not found in struct: %+v", checkField)
 		}
 
@@ -729,22 +730,69 @@ func (d decoder) fieldTypesConsistent(check, gold *reflection.StructField) (noDe
 	return false, errors.Errorf("check field type/kind does not match gold type/kind; check:%+v; gold:%+v", check, gold)
 }
 
-func findStructField(fields []*reflection.StructField, targetKey reflection.AliasedKey) (*reflection.StructField, bool) {
-	for i := range fields {
-		fieldPtr := fields[i]
-		if len(fieldPtr.AliasedKey) != len(targetKey) {
-			// Can't possibly match
-			continue
+// findStructField finds the field at targetKey in fields. If the field is found at the
+// full key (i.e., the field is a struct field), exactMatch will be true. If a field is
+// found at the prefix of the key, it will be returned and exact will be false (the caller
+// may wish to check if the type of the prefix is a map).
+// If the key isn't found at all, then sf will nil.
+func findStructField(fields []*reflection.StructField, targetKey reflection.AliasedKey) (sf *reflection.StructField, exactMatch bool) {
+	// We'll try to find the key in the struct fields. If we can't find a full match,
+	// we'll look for prefixes, as we might be settings a map-within-a-struct, that only
+	// has struct fields up to a certain point, and that we still want to match.
+	targetKeyPrefix := targetKey
+	for len(targetKeyPrefix) > 0 {
+		for i := range fields {
+			fieldPtr := fields[i]
+			if len(fieldPtr.AliasedKey) != len(targetKeyPrefix) {
+				// Can't possibly match
+				continue
+			}
+
+			if targetKeyPrefix.Equal(fieldPtr.AliasedKey) {
+				// We found the field or a map prefix of it
+				sf = fieldPtr
+				exactMatch = (len(targetKeyPrefix) == len(targetKey))
+				return sf, exactMatch
+			}
 		}
 
-		if targetKey.Equal(fieldPtr.AliasedKey) {
-			// We found the field
-			return fieldPtr, true
-		}
+		// Didn't find it; try the next shorter prefix
+		targetKeyPrefix = targetKeyPrefix[:len(targetKeyPrefix)-1]
 	}
 
 	// We exhausted the search without a match
 	return nil, false
+}
+
+// Returns true if the given key exists in val, possibly deep. Returns false if the val
+// is not a map, or any required sub-map doesn't exist.
+func mapFieldExists(key reflection.AliasedKey, val reflect.Value) bool {
+	if len(key) == 0 {
+		return true
+	}
+
+	var mapValue reflect.Value
+	if (val.Kind() == reflect.Ptr || val.Kind() == reflect.Interface) && val.Elem().IsValid() && (val.Elem().Kind() == reflect.Map) {
+		mapValue = val.Elem()
+	} else if val.Kind() == reflect.Map {
+		mapValue = val
+	} else {
+		// not a map or pointer to a map
+		return false
+	}
+
+	for _, k := range mapValue.MapKeys() {
+		if k.Kind() != reflect.String {
+			// Not a map key kind we can compare against
+			return false
+		}
+
+		if k.String() == key[0][0] {
+			return mapFieldExists(key[1:], mapValue.MapIndex(k))
+		}
+	}
+
+	return false
 }
 
 func aliasedKeyFromKey(key Key) reflection.AliasedKey {

@@ -1446,6 +1446,90 @@ func TestLoad(t *testing.T) {
 
 	//----------------------------------------------------------------------
 
+	// Tests https://github.com/Psiphon-Inc/configloader-go/issues/3
+	tst = test{}
+	tst.name = "env override of map value"
+	tst.args.codec = toml.Codec
+	tst.args.readers = makeStringReaders([]string{
+		`
+		[M]
+		a = 1
+		b = 2
+		`,
+	})
+	tst.args.readerNames = nil
+	tst.args.envOverrides = []EnvOverride{
+		{
+			EnvVar: "MB_FROM_ENV",
+			Key:    Key{"M", "b"},
+			Conv: func(v string) (interface{}, error) {
+				return strconv.ParseInt(v, 10, 64)
+			},
+		},
+	}
+	tst.env = map[string]string{
+		"MB_FROM_ENV": "33",
+	}
+	tst.args.defaults = nil
+	tst.wantConfig = structWithTypedMap{
+		M: map[string]int{
+			"a": 1,
+			"b": 33,
+		},
+	}
+	tst.wantErr = false
+	tst.wantProvenances = map[string]string{
+		"M.a": "[0]",
+		"M.b": "$MB_FROM_ENV",
+	}
+	tst.wantIsDefineds = []Key{}
+	tst.wantNotIsDefineds = []Key{}
+	tst.wantErrIsDefineds = []Key{}
+	tests = append(tests, tst)
+
+	//----------------------------------------------------------------------
+
+	// Tests https://github.com/Psiphon-Inc/configloader-go/issues/3
+	tst = test{}
+	tst.name = "default for map value"
+	tst.args.codec = toml.Codec
+	tst.args.readers = makeStringReaders([]string{
+		`
+		[M]
+		a = 1
+		b = 2
+		`,
+	})
+	tst.args.readerNames = nil
+	tst.args.envOverrides = nil
+	tst.env = nil
+	tst.args.defaults = []Default{
+		{
+			Key: Key{"M", "def"}, // struct key, not alias
+			Val: 321,
+		},
+	}
+
+	tst.wantConfig = structWithTypedMap{
+		M: map[string]int{
+			"a":   1,
+			"b":   2,
+			"def": 321,
+		},
+	}
+	tst.wantErr = false
+	tst.wantProvenances = map[string]string{
+		"M.a":   "[0]",
+		"M.b":   "[0]",
+		"M.def": "[default]",
+	}
+	tst.wantIsDefineds = []Key{}
+	tst.wantNotIsDefineds = []Key{}
+	tst.wantErrIsDefineds = []Key{}
+	tests = append(tests, tst)
+
+	//----------------------------------------------------------------------
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			os.Clearenv()
@@ -1615,7 +1699,8 @@ func Test_findStructField(t *testing.T) {
 	tests := []struct {
 		name      string
 		args      args
-		wantMatch bool
+		wantSF    bool
+		wantExact bool
 	}{
 		{
 			name: "simple",
@@ -1631,7 +1716,8 @@ func Test_findStructField(t *testing.T) {
 					},
 				},
 			},
-			wantMatch: true,
+			wantSF:    true,
+			wantExact: true,
 		},
 		{
 			name: "aliases",
@@ -1665,13 +1751,13 @@ func Test_findStructField(t *testing.T) {
 					},
 				},
 			},
-			wantMatch: true,
+			wantSF:    true,
+			wantExact: true,
 		},
 		{
 			name: "no match",
 			args: args{
 				targetKey: reflection.AliasedKey{
-					{"b"},
 					{"nomatch"},
 				},
 				fields: []*reflection.StructField{
@@ -1699,22 +1785,197 @@ func Test_findStructField(t *testing.T) {
 					},
 				},
 			},
-			wantMatch: false,
+			wantSF:    false,
+			wantExact: false,
+		},
+		{
+			name: "prefix match",
+			args: args{
+				targetKey: reflection.AliasedKey{
+					{"a1"}, {"nope"},
+				},
+				fields: []*reflection.StructField{
+					{
+						AliasedKey: reflection.AliasedKey{
+							{"a1"},
+						},
+					},
+					{
+						AliasedKey: reflection.AliasedKey{
+							{"a1"},
+							{"a2"},
+						},
+					},
+				},
+			},
+			wantSF:    true,
+			wantExact: false,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gotStructField, ok := findStructField(tt.args.fields, tt.args.targetKey)
-			if ok != tt.wantMatch {
-				t.Fatalf("findStructField() ok = %v, want %v", ok, tt.wantMatch)
+			gotStructField, exact := findStructField(tt.args.fields, tt.args.targetKey)
+			if (gotStructField != nil) != tt.wantSF {
+				t.Fatalf("findStructField() gotStructField = %v, want %v", gotStructField, tt.wantSF)
 			}
 
-			if !ok {
+			if exact != tt.wantExact {
+				t.Fatalf("findStructField() exact = %v, want %v", exact, tt.wantExact)
+			}
+
+			if gotStructField == nil {
 				return
 			}
 
-			if !gotStructField.AliasedKey.Equal(tt.args.targetKey) {
-				t.Fatalf("gotStructField doesn't actually match target: got %+v; want %+v", gotStructField.AliasedKey, tt.args.targetKey)
+			if exact {
+				if !gotStructField.AliasedKey.Equal(tt.args.targetKey) {
+					t.Fatalf("gotStructField doesn't actually match target: got %+v; want %+v", gotStructField.AliasedKey, tt.args.targetKey)
+				}
+			} else {
+				if !gotStructField.AliasedKey.Equal(tt.args.targetKey[:len(gotStructField.AliasedKey)]) {
+					t.Fatalf("gotStructField doesn't actually match target: got %+v; want %+v", gotStructField.AliasedKey, tt.args.targetKey)
+				}
+
+			}
+		})
+	}
+}
+
+func Test_mapFieldExists(t *testing.T) {
+	type args struct {
+		key Key
+		val reflect.Value
+	}
+
+	type test struct {
+		name string
+		args args
+		want bool
+	}
+
+	var tests []test
+	var tst test
+
+	i := 123
+	tst = test{
+		name: "not map",
+		args: args{
+			key: Key{"a"},
+			val: reflect.ValueOf(i),
+		},
+		want: false,
+	}
+	tests = append(tests, tst)
+
+	var nullMap map[string]interface{}
+	tst = test{
+		name: "null map",
+		args: args{
+			key: Key{"a"},
+			val: reflect.ValueOf(nullMap),
+		},
+		want: false,
+	}
+	tests = append(tests, tst)
+
+	emptyMap := make(map[string]interface{})
+	tst = test{
+		name: "empty map",
+		args: args{
+			key: Key{"a", "b"},
+			val: reflect.ValueOf(emptyMap),
+		},
+		want: false,
+	}
+	tests = append(tests, tst)
+
+	nonStringKeyMap := make(map[int]interface{})
+	nonStringKeyMap[123] = nil
+	tst = test{
+		name: "map with non-string key",
+		args: args{
+			key: Key{"123"},
+			val: reflect.ValueOf(nonStringKeyMap),
+		},
+		want: false,
+	}
+	tests = append(tests, tst)
+
+	shallowMap := make(map[string]int)
+	shallowMap["a"] = 123
+	tst = test{
+		name: "shallow map, found",
+		args: args{
+			key: Key{"a"},
+			val: reflect.ValueOf(shallowMap),
+		},
+		want: true,
+	}
+	tests = append(tests, tst)
+
+	tst = test{
+		name: "shallow map, not found",
+		args: args{
+			key: Key{"b"},
+			val: reflect.ValueOf(shallowMap),
+		},
+		want: false,
+	}
+	tests = append(tests, tst)
+
+	deepMap := make(map[string]map[string]bool)
+	deepMap["a"] = make(map[string]bool)
+	deepMap["a"]["b"] = true
+	tst = test{
+		name: "deep map, found",
+		args: args{
+			key: Key{"a", "b"},
+			val: reflect.ValueOf(deepMap),
+		},
+		want: true,
+	}
+	tests = append(tests, tst)
+
+	tst = test{
+		name: "deep map, not found",
+		args: args{
+			key: Key{"a", "c"},
+			val: reflect.ValueOf(deepMap),
+		},
+		want: false,
+	}
+	tests = append(tests, tst)
+
+	deepComplex := make(map[string]*map[string]interface{})
+	sub := make(map[string]interface{})
+	subSub := make(map[string]bool)
+	subSub["c"] = true
+	sub["b"] = subSub
+	deepComplex["a"] = &sub
+	tst = test{
+		name: "deep complex map, found",
+		args: args{
+			key: Key{"a", "b", "c"},
+			val: reflect.ValueOf(deepComplex),
+		},
+		want: true,
+	}
+	tests = append(tests, tst)
+
+	tst = test{
+		name: "deep complex map, not found",
+		args: args{
+			key: Key{"a", "b", "d"},
+			val: reflect.ValueOf(deepComplex),
+		},
+		want: false,
+	}
+	tests = append(tests, tst)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := mapFieldExists(aliasedKeyFromKey(tt.args.key), tt.args.val); got != tt.want {
+				t.Errorf("mapFieldExists() = %v, want %v", got, tt.want)
 			}
 		})
 	}
